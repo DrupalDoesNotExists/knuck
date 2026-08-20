@@ -229,6 +229,11 @@ halt() → ok                       -- halt(8): выключение
 - Ядро грузит модули по конфигу, запускает pid 1 (`/sbin/init`) с root-кредами.
 - init работает по **init.rc** (стиль Android: сервисы, действия). Формат init.rc — дело init;
   ядро даёт `spawn`/`exec`/`waitpid` для этого.
+- **Boot-time self-diagnostics**: перед запуском init ядро прогоняет самопроверку платформы
+  (наличие `debug.sethook`, yield-from-hook, `collectgarbage`, fs-хэндлов, версии Lua/CraftOS).
+  Результат пишется в `/proc/selfcheck` и в лог. Если критичная фича отсутствует
+  (например, нет yield-from-hook) — ядро откатывает планировщик на кооператив и помечает
+  это в `/proc/selfcheck`. Диагностика — часть ядра, не отдельный скрипт.
 
 ## 7. man
 
