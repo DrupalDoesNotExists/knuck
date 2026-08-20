@@ -79,6 +79,7 @@ if luaver:find("5.2") or luaver:find("5.3") or luaver:find("5.4") then
 else
   limited("lua_version", luaver)
 end
+page("CraftOS: " .. tostring(os.version and os.version() or "unknown"))
 
 -- 1.2 Standard libraries
 local stdlibs = { "string", "table", "math", "coroutine", "io", "os", "debug" }
@@ -125,9 +126,9 @@ else
   limited("table.api", "missing: " .. table.concat(missing, ", "))
 end
 
--- 1.6 math functions
+-- 1.6 math functions (5.2 set; pow/log10/atan2/cosh/sinh/tanh are 5.1-only)
 local math_funcs = { "abs", "ceil", "floor", "max", "min", "random", "randomseed",
-  "sqrt", "pow", "sin", "cos", "tan", "log", "exp", "fmod", "huge", "pi" }
+  "sqrt", "sin", "cos", "tan", "log", "exp", "fmod", "modf", "deg", "rad", "huge", "pi" }
 missing = {}
 for _, f in ipairs(math_funcs) do
   if not libfn(math, f) then missing[#missing + 1] = f end
@@ -177,9 +178,18 @@ else
 end
 
 -- 1.11 Sandbox: load with custom _ENV
+local function make_sandbox()
+  return {
+    print = print, string = string, math = math, table = table,
+    type = type, tostring = tostring, pairs = pairs, ipairs = ipairs,
+    select = select, error = error, pcall = pcall, xpcall = xpcall,
+    next = next, rawget = rawget, rawset = rawset,
+    setmetatable = setmetatable, getmetatable = getmetatable,
+    unpack = table.unpack or unpack,
+  }
+end
 local ok_load, load_res = pcall(function()
-  local sandbox = { print = print, string = string, math = math, table = table }
-  local chunk = load("return type(os) == 'nil' and type(fs) == 'nil'", "sandbox-test", "t", sandbox)
+  local chunk = load("return type(os) == 'nil' and type(fs) == 'nil'", "sandbox-test", "t", make_sandbox())
   return chunk and chunk()
 end)
 if ok_load and load_res == true then
@@ -269,9 +279,9 @@ probe("os.epoch", function() return os.epoch("utc") end)
 probe("os.getComputerLabel", function() return os.getComputerLabel() or "none" end)
 
 -- 2.2 fs
-local fs_funcs = { "open", "close", "read", "write", "seek", "list", "exists",
-  "isDir", "isReadOnly", "getSize", "makeDir", "delete", "rename", "getDrive",
-  "getFreeSpace", "find", "getCapacity", "attributes", "combine", "getName", "getDir" }
+local fs_funcs = { "open", "list", "exists", "isDir", "isReadOnly", "getSize",
+  "makeDir", "delete", "rename", "getDrive", "getFreeSpace", "find", "getCapacity",
+  "attributes", "combine", "getName", "getDir" }
 missing = {}
 for _, f in ipairs(fs_funcs) do
   if not libfn(fs, f) then missing[#missing + 1] = f end
@@ -281,6 +291,21 @@ if #missing == 0 then
 else
   limited("fs.api", "missing: " .. table.concat(missing, ", "))
 end
+
+-- fs handle methods (close/read/write/seek are handle methods, not fs.*)
+probe("fs.handle", function()
+  local h = fs.open("/tmp/knuck_handle.txt", "w")
+  if not h then error("open failed") end
+  local methods = { "close", "read", "write", "seek", "readAll", "readLine", "writeLine" }
+  local miss = {}
+  for _, m in ipairs(methods) do
+    if type(h[m]) ~= "function" then miss[#miss + 1] = m end
+  end
+  h.close()
+  fs.delete("/tmp/knuck_handle.txt")
+  if #miss > 0 then error("missing: " .. table.concat(miss, ", ")) end
+  return "all handle methods present"
+end)
 
 -- fs read/write roundtrip in /tmp
 probe("fs.rw", function()
@@ -599,8 +624,7 @@ end)
 
 -- 5.2 load with custom env (isolation feasibility)
 probe("sandbox.load_env", function()
-  local sandbox = { print = print, string = string, math = math, table = table }
-  local chunk = load("return type(os) == 'nil' and type(fs) == 'nil' and type(term) == 'nil'", "s", "t", sandbox)
+  local chunk = load("return type(os) == 'nil' and type(fs) == 'nil' and type(term) == 'nil'", "s", "t", make_sandbox())
   return chunk and chunk()
 end)
 
