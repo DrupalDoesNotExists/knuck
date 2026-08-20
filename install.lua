@@ -22,8 +22,17 @@ local FILES = {
   "kernel/sched.lua",
   "kernel/syscall.lua",
   "kernel/proc.lua",
+  "kernel/fs.lua",
   "kernel/vfs.lua",
+  "kernel/ipc.lua",
+  "kernel/net.lua",
+  "kernel/net_transport.lua",
   "kernel/drivers/term.lua",
+  "sbin/init.lua",
+  "sbin/hello.lua",
+  "sbin/ipc_child.lua",
+  "sbin/sh.lua",
+  "tests/vfs_ipc_test.lua",
 }
 
 local function ensure_dir(path)
@@ -67,8 +76,36 @@ end
 print("")
 print("Installed " .. #FILES .. " files, " .. total .. " bytes.")
 print("")
-print("Run the kernel:")
+
+-- Configure autostart so the kernel boots on CC startup.
+-- CraftOS 1.9 runs /startup at boot. Append the kernel run line.
+local STARTUP = "/startup"
+local line = "shell.run(\"" .. DEST .. "/knuck.lua\")\n"
+local existing = ""
+if fs.exists(STARTUP) then
+  local h = fs.open(STARTUP, "r")
+  if h then
+    existing = h.readAll() or ""
+    h.close()
+  end
+end
+if existing:find(line, 1, true) then
+  print("Autostart already configured in " .. STARTUP)
+else
+  local h = fs.open(STARTUP, "w")
+  if h then
+    h.write(existing .. line)
+    h.close()
+    print("Autostart configured: appended to " .. STARTUP)
+  else
+    print("WARNING: could not write " .. STARTUP .. " - add manually:")
+    print("  " .. line)
+  end
+end
+
+print("")
+print("Run the kernel now:")
 print("  lua " .. DEST .. "/knuck.lua")
 print("")
-print("To auto-start on boot, add to startup:")
-print("  shell.run(\"" .. DEST .. "/knuck.lua\")")
+print("Debug shell (after boot):")
+print("  lua " .. DEST .. "/sbin/sh.lua")
