@@ -23,16 +23,50 @@ local function tokenize(line)
 end
 
 -- Read one line from an open fd (console or file)
+-- Extract a character from a console read result.
+-- Console reads return an EVENT TABLE (e.g. {"char","x"} or {"key",28});
+-- file reads return a plain string. Handle both.
+local ENTER_KEY_CC = 28        -- CC 1.9
+local ENTER_KEY_TW = 257       -- CC:Tweaked
+local BS_KEY_CC = 14           -- CC 1.9
+local BS_KEY_TW = 259          -- CC:Tweaked
+
+local function evchar(v)
+  if type(v) == "string" then return v end
+  if type(v) ~= "table" then return nil end
+  if v[1] == "char" then
+    return v[2]
+  elseif v[1] == "key" then
+    local code = v[2]
+    if code == ENTER_KEY_CC or code == ENTER_KEY_TW then return "\n" end
+    if code == BS_KEY_CC or code == BS_KEY_TW then return "\b" end
+    return nil  -- ignore other keys
+  end
+  return nil
+end
+
 local function readline(fd)
   local buf = ""
   while true do
-    local c = read(fd, 1)
-    if not c or c == "" then
+    local v = read(fd, 1)
+    if v == nil then
       if buf == "" then return nil end
       return buf
     end
-    if c == "\n" then return buf end
-    if c ~= "\r" then buf = buf .. c end
+    local c = evchar(v)
+    if c == nil then
+      -- key event we ignore; keep reading
+    elseif c == "" then
+      -- EOF (file read returns empty string at end)
+      if buf == "" then return nil end
+      return buf
+    elseif c == "\n" then
+      return buf
+    elseif c == "\b" then
+      buf = buf:sub(1, -2)
+    elseif c ~= "\r" then
+      buf = buf .. c
+    end
   end
 end
 
