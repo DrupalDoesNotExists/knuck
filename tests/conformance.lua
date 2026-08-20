@@ -17,9 +17,17 @@ local function report(name, status, detail)
   results[#results + 1] = { name = name, status = status, detail = detail }
 end
 
+-- Постраничный вывод: строка → ждёт клавишу → чистит экран
+local function page(text)
+  term.clear()
+  term.setCursorPos(1, 1)
+  io.write(text .. "\n")
+  io.write("--- нажми любую клавишу ---")
+  os.pullEvent("key")
+end
+
 local function section(title)
-  print("")
-  print("===== " .. title .. " =====")
+  page("===== " .. title .. " =====")
 end
 
 local function ok(name, detail)
@@ -50,7 +58,7 @@ section("1. ПЛАТФОРМА (CraftOS / рантайм)")
 
 -- 1.1 Версия Lua
 local luaver = _VERSION or "unknown"
-print("Lua version: " .. tostring(luaver))
+page("Lua version: " .. tostring(luaver))
 if luaver:find("5.2") or luaver:find("5.3") or luaver:find("5.4") then
   ok("lua_version", luaver)
 else
@@ -138,7 +146,7 @@ end
 if type(peripheral) == "table" then
   ok("peripheral.api", "present")
   local sides = peripheral.getNames and peripheral.getNames() or {}
-  print("  peripherals: " .. table.concat(sides, ", "))
+  page("  peripherals: " .. table.concat(sides, ", "))
 else
   cut("peripheral.api", "peripheral table missing")
 end
@@ -192,7 +200,7 @@ else
 end
 
 -- 1.13 Таймаут-сторож CC (watchdog)
-print("  note: CC watchdog ~7s soft abort / +1.5s hard abort (TimeoutState)")
+page("  note: CC watchdog ~7s soft abort / +1.5s hard abort (TimeoutState)")
 
 -- ============================================================
 -- СЕКЦИЯ 2: ЯДРО KNUCK
@@ -203,8 +211,8 @@ section("2. ЯДРО KNUCK (сисколлы)")
 local K = rawget(_G, "knuck") or rawget(_G, "k")
 local in_kernel = type(K) == "table" and type(K.syscall) == "function"
 if not in_kernel then
-  print("  Ядро не обнаружено — сисколлы не проверяются.")
-  print("  Запустите тест ВНУТРИ KNUCK для секции 2.")
+  page("  Ядро не обнаружено — сисколлы не проверяются.")
+  page("  Запустите тест ВНУТРИ KNUCK для секции 2.")
 end
 
 -- Хелпер: проверить сисколл
@@ -284,7 +292,7 @@ if in_kernel then
     cut("fork", "not available (coroutine clone impossible)")
   end
 else
-  print("  (kernel not present)")
+  page("  (kernel not present)")
 end
 
 -- 2.2 Безопасность
@@ -294,7 +302,7 @@ if in_kernel then
   syscall("chown", function() return K.syscall("chown", "/tmp", 0, 0) end)
   syscall("chgrp", function() return K.syscall("chgrp", "/tmp", 0) end)
 else
-  print("  (kernel not present)")
+  page("  (kernel not present)")
 end
 
 -- 2.3 IPC
@@ -363,7 +371,7 @@ if in_kernel then
   syscall("select", function() return K.syscall("select", {}, {}, 0) end)
   syscall("poll", function() return K.syscall("poll", {}, 0) end)
 else
-  print("  (kernel not present)")
+  page("  (kernel not present)")
 end
 
 -- 2.4 VFS
@@ -446,7 +454,7 @@ if in_kernel then
     end
   end
 else
-  print("  (kernel not present)")
+  page("  (kernel not present)")
 end
 
 -- 2.5 Модули
@@ -455,7 +463,7 @@ if in_kernel then
   syscall("insmod", function() return K.syscall("insmod", "/boot/modules/testmod.lua") end)
   syscall("rmmod", function() return K.syscall("rmmod", "testmod") end)
 else
-  print("  (kernel not present)")
+  page("  (kernel not present)")
 end
 
 -- 2.6 Сеть
@@ -483,7 +491,7 @@ if in_kernel then
     cut("net_route", tostring(rres))
   end
 else
-  print("  (kernel not present)")
+  page("  (kernel not present)")
 end
 
 -- 2.7 Консоль/ввод
@@ -503,7 +511,7 @@ if in_kernel then
     err("ioctl_setmode", tostring(sres))
   end
 else
-  print("  (kernel not present)")
+  page("  (kernel not present)")
 end
 
 -- 2.8 Питание — только наличие, НЕ вызываем
@@ -522,7 +530,7 @@ if in_kernel then
     err("halt", tostring(hres))
   end
 else
-  print("  (kernel not present)")
+  page("  (kernel not present)")
 end
 
 -- ============================================================
@@ -533,14 +541,12 @@ local counts = { OK = 0, LIMITED = 0, CUT = 0, ERROR = 0, SKIP = 0 }
 for _, r in ipairs(results) do
   counts[r.status] = (counts[r.status] or 0) + 1
 end
-print(string.format("OK: %d   LIMITED: %d   CUT: %d   ERROR: %d   SKIP: %d",
+page(string.format("OK: %d   LIMITED: %d   CUT: %d   ERROR: %d   SKIP: %d",
   counts.OK or 0, counts.LIMITED or 0, counts.CUT or 0, counts.ERROR or 0, counts.SKIP or 0))
 
-print("")
-print("--- Детали ---")
+page("--- Детали ---")
 for _, r in ipairs(results) do
-  print(string.format("[%s] %s%s", r.status, r.name, r.detail ~= "" and (" — " .. r.detail) or ""))
+  page(string.format("[%s] %s%s", r.status, r.name, r.detail ~= "" and (" — " .. r.detail) or ""))
 end
 
-print("")
-print("Тест завершён. Скопируйте вывод и пришлите его разработчику.")
+page("Тест завершён. Скопируйте вывод и пришлите его разработчику.")
