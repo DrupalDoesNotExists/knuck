@@ -15,6 +15,22 @@ return function(K)
   local syscalls = {}
   local proc_mod = nil
 
+  -- Sentinel for nil in packed syscall results. Lua tables can't hold a nil
+  -- in the middle of an array without breaking #t / table.unpack, so nil
+  -- results are stored as this sentinel and converted back in the wrapper.
+  local NIL = {}
+  local function pack(...)
+    local t = { n = select("#", ...) }
+    for i = 1, t.n do
+      local v = select(i, ...)
+      t[i] = (v == nil) and NIL or v
+    end
+    return t
+  end
+  -- Expose the nil sentinel so the process wrapper (proc.lua) can convert it
+  -- back to nil when unpacking syscall results.
+  M.NIL = NIL
+
   function M.init(K)
     proc_mod = K.proc
   end
@@ -38,18 +54,19 @@ return function(K)
       proc_mod.die(proc, "SIGSYS", "unknown syscall: " .. tostring(name))
       return
     end
-    -- Capture all handler return values into a table (pcall keeps only the
-    -- first, so wrap). The process wrapper unpacks this table.
-    local results = { pcall(handler, proc, table.unpack(args or {})) }
-    local ok = table.remove(results, 1)
+    -- Pack all handler return values (preserving nil, err) into a table.
+    -- pcall wraps so an error kills the process (SIGSYS).
+    local ok, packed = pcall(function()
+      return pack(handler(proc, table.unpack(args or {})))
+    end)
     if not ok then
-      proc_mod.die(proc, "SIGSYS", name .. ": " .. tostring(results[1]))
+      proc_mod.die(proc, "SIGSYS", name .. ": " .. tostring(packed))
       return
     end
     -- If the handler blocked the process, it is now "waiting"; do not resume.
-    -- Otherwise resume with the handler's results.
+    -- Otherwise resume with the packed results.
     if proc.state == "running" then
-      K.sched.resume(proc, results)
+      K.sched.resume(proc, packed)
     end
   end
 
@@ -127,6 +144,41 @@ return function(K)
     return proc_mod.spawn(path, proc.pid, proc.uid, proc.gid, args, proc.tty)
   end)
 
+  -- exec(path, ...) — execve(2) analog: replace the current process image.
+  -- On success never returns; on failure returns nil, err (old image keeps
+  -- running). Applies setuid/setgid bits and resets signal handlers (POSIX).
+  M.register("exec", function(proc, path, ...)
+    local args = { ... }
+    local resolved = K.vfs.resolve(proc, path)
+    if not resolved then return nil, "no such file" end
+    local ino = K.vfs.get_inode(resolved)
+    if not ino then return nil, "no such file" end
+    if ino.type ~= "file" then return nil, "not a file" end
+    if not K.fs.check_access(proc, ino, "x") then
+      return nil, "permission denied"
+    end
+    -- setuid/setgid bits (04000=0x800, 02000=0x400 octal)
+    if K.bit.band(ino.mode, 0x800) ~= 0 then proc.euid = ino.uid end
+    if K.bit.band(ino.mode, 0x400) ~= 0 then proc.egid = ino.gid end
+    -- fresh sandbox env + load the new image
+    local env = proc_mod.make_env()
+    local fn, err = K.vfs.loadfile(resolved, env)
+    if not fn then return nil, err end
+    proc.co = coroutine.create(function()
+      return fn(table.unpack(args))
+    end)
+    proc.env = env
+    proc.name = path
+    -- POSIX exec semantics: reset signal handlers/mask to default
+    proc.sig.handlers = {}
+    proc.sig.pending = {}
+    proc.sig.blocked = {}
+    proc.sig._pending_result = nil
+    -- Enqueue with nil result. handle() sees state ~= "running" and skips
+    -- its own resume, so the process runs the new image exactly once.
+    K.sched.resume(proc, nil)
+  end)
+
   -- waitpid (blocking)
   M.register("waitpid", function(proc, pid, opt)
     if opt == "nohang" then
@@ -147,6 +199,59 @@ return function(K)
   -- kill
   M.register("kill", function(proc, pid, sig)
     return proc_mod.kill(proc, pid, sig)
+  end)
+
+  -- signal(sig, handler|nil|"ignore") — sigaction(2) analog
+  M.register("signal", function(proc, sig, handler)
+    if sig == 9 or sig == 19 then
+      return nil, "cannot change handler for SIGKILL/SIGSTOP"
+    end
+    if handler == nil then
+      proc.sig.handlers[sig] = "default"
+    elseif handler == "ignore" then
+      proc.sig.handlers[sig] = "ignore"
+    elseif type(handler) == "function" then
+      proc.sig.handlers[sig] = handler
+    else
+      return nil, "invalid handler"
+    end
+    return true
+  end)
+
+  -- sigprocmask(how, set) — "block"|"unblock"|"set". KILL/STOP never blockable.
+  M.register("sigprocmask", function(proc, how, set)
+    if how == "block" then
+      for _, s in ipairs(set or {}) do
+        if s ~= 9 and s ~= 19 then proc.sig.blocked[s] = true end
+      end
+    elseif how == "unblock" then
+      for _, s in ipairs(set or {}) do
+        proc.sig.blocked[s] = nil
+      end
+    elseif how == "set" then
+      proc.sig.blocked = {}
+      for _, s in ipairs(set or {}) do
+        if s ~= 9 and s ~= 19 then proc.sig.blocked[s] = true end
+      end
+    else
+      return nil, "invalid how"
+    end
+    return true
+  end)
+
+  -- alarm(secs) — SIGALRM after secs; 0/nil cancels the pending alarm
+  M.register("alarm", function(proc, secs)
+    if proc.sig._alarm_timer then
+      K.env.os.cancelTimer(proc.sig._alarm_timer)
+      proc_mod.alarm_timers[proc.sig._alarm_timer] = nil
+      proc.sig._alarm_timer = nil
+    end
+    if secs and secs > 0 then
+      local id = K.env.os.startTimer(secs)
+      proc.sig._alarm_timer = id
+      proc_mod.alarm_timers[id] = proc
+    end
+    return true
   end)
 
   -- sched_yield

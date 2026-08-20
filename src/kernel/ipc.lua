@@ -94,7 +94,11 @@ return function(K)
   -- Write to a pipe. Returns bytes or nil (EPIPE).
   function M.pipe_write(proc, fd, data)
     local p = fd.pipe
-    if p.closed_r then return nil, "EPIPE" end
+    if p.closed_r then
+      -- SIGPIPE: write to a pipe with no reader
+      if K.proc and K.proc.send_signal then K.proc.send_signal(proc, 13) end
+      return nil, "EPIPE"
+    end
     p.buffer[#p.buffer + 1] = data
     -- wake a waiting reader
     for r in pairs(p.readers) do

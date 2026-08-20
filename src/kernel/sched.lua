@@ -84,8 +84,18 @@ return function(K)
   end
 
   -- Resume a process with a result (or nil). Re-enqueues it.
+  -- Pending signals are delivered first: the result is saved and the
+  -- process resumes with {"__signal", sig, handler} instead.
   function M.resume(proc, result)
-    proc.pending_result = result
+    local sig_num = proc_mod.check_signal(proc)
+    if sig_num then
+      proc.sig._pending_result = result
+      local handler = proc.sig.handlers[sig_num] or "default"
+      proc.sig.pending[sig_num] = nil
+      proc.pending_result = { "__signal", sig_num, handler }
+    else
+      proc.pending_result = result
+    end
     M.enqueue(proc)
   end
 
@@ -127,6 +137,21 @@ return function(K)
       elseif req[1] == "preempt" then
         -- Quantum expired: requeue
         M.enqueue(proc)
+      elseif req[1] == "__ack_signal" then
+        -- Signal handler finished: restore the saved syscall result and
+        -- chain any further pending signals.
+        local saved = proc.sig._pending_result
+        proc.sig._pending_result = nil
+        local next_sig = proc_mod.check_signal(proc)
+        if next_sig then
+          proc.sig._pending_result = saved
+          proc.sig.pending[next_sig] = nil
+          local handler = proc.sig.handlers[next_sig] or "default"
+          proc.pending_result = { "__signal", next_sig, handler }
+        else
+          proc.pending_result = saved
+        end
+        M.enqueue(proc)
       end
     end
 
@@ -153,6 +178,14 @@ return function(K)
     dispatch = function(ev)
       local name = ev[1]
       if name == "timer" then
+        -- alarm() timers deliver SIGALRM to the owning process
+        local alarm_proc = proc_mod.alarm_timers and proc_mod.alarm_timers[ev[2]]
+        if alarm_proc then
+          proc_mod.alarm_timers[ev[2]] = nil
+          alarm_proc.sig._alarm_timer = nil
+          proc_mod.send_signal(alarm_proc, 14)  -- SIGALRM
+          return
+        end
         -- network timers (ARP expiry, etc.) are handled first
         if K.net and K.net.timer_fired and K.net.timer_fired(ev[2]) then return end
         M.wake("timer", ev[2], true)

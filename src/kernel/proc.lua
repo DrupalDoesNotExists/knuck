@@ -15,6 +15,7 @@ return function(K)
   local processes = {}          -- pid -> process
   local next_pid = 1
   local init_pid = nil
+  local alarm_timers = {}       -- CC timer id -> proc (alarm() SIGALRM delivery)
 
   -- Safe stdlibs exposed to processes
   local SAFE_LIBS = { "string", "math", "table", "coroutine" }
@@ -42,15 +43,40 @@ return function(K)
       env[name] = function(...)
         local args = { ... }
         local res = coroutine.yield({ "syscall", name, args })
-        if type(res) == "table" then
-          return table.unpack(res)
-        else
-          return res
+        -- Signal delivery: the kernel may inject {"__signal", sig, handler}
+        -- instead of the syscall result. Run the handler, then ack.
+        while type(res) == "table" and res[1] == "__signal" do
+          local sig_num, handler = res[2], res[3]
+          if handler == "default" then
+            error("killed by signal " .. sig_num)
+          elseif handler == "ignore" then
+            -- no-op
+          elseif type(handler) == "function" then
+            handler(sig_num)
+          end
+          res = coroutine.yield({ "__ack_signal" })
         end
+        -- Packed syscall results carry an explicit count (.n) and use a
+        -- sentinel for nil so nil,err results survive the table round-trip.
+        if type(res) == "table" and res.n then
+          local out = {}
+          for i = 1, res.n do
+            if res[i] == K.syscall.NIL then
+              out[i] = nil
+            else
+              out[i] = res[i]
+            end
+          end
+          return table.unpack(out, 1, res.n)
+        end
+        return res
       end
     end
     return env
   end
+
+  -- Expose the env builder so exec() (syscall.lua) can build a fresh sandbox
+  M.make_env = make_env
 
   -- Load process code from a VFS path with a sandbox env
   local function load_process(path, env)
@@ -88,6 +114,12 @@ return function(K)
       children = {},
       exitcode = nil,
       pending_result = nil,
+      sig = {
+        handlers = {},    -- sig_num -> fn | "ignore" | "default"
+        pending = {},     -- set of sig_nums awaiting delivery
+        blocked = {},     -- set of sig_nums blocked from delivery
+        _pending_result = nil,  -- saved syscall result during signal delivery
+      },
     }
 
     -- Create the coroutine; pass args
@@ -141,8 +173,70 @@ return function(K)
     M.notify_parent(proc)
   end
 
-  -- Kill a process by signal
+  -- Send a signal to a process. KILL(9)/STOP(19) are immediate and
+  -- unblockable; other signals are queued for delivery at the next resume
+  -- boundary (unless blocked or ignored).
+  function M.send_signal(target, sig_num)
+    if sig_num == 9 then  -- SIGKILL: immediate death
+      target.state = "zombie"
+      target.exitcode = 128 + 9
+      target.exitstatus = { "killed", 9 }
+      M.notify_parent(target)
+      return true
+    elseif sig_num == 19 then  -- SIGSTOP: immediate stop
+      target.state = "stopped"
+      return true
+    elseif sig_num == 18 then  -- SIGCONT: resume a stopped process
+      if target.state == "stopped" then
+        K.sched.enqueue(target)
+      end
+      return true
+    end
+    -- Blocked signals are dropped (POSIX: pending while blocked; this kernel
+    -- keeps it simple: blocked = lost).
+    if target.sig.blocked[sig_num] then return true end
+    local handler = target.sig.handlers[sig_num]
+    if handler == "ignore" then return true end
+    target.sig.pending[sig_num] = true
+    return true
+  end
+
+  -- Pick the next deliverable signal for a process about to be resumed.
+  -- Returns sig_num or nil. Called from sched.resume, which fires both after
+  -- a syscall (state "running") and when waking from a wait (state "waiting";
+  -- M.wake already removed the proc from the waiting table, so enqueueing is
+  -- safe). STOP/CONT are handled directly in send_signal.
+  function M.check_signal(proc)
+    if proc.state ~= "ready" and proc.state ~= "running" and proc.state ~= "waiting" then return nil end
+    for sig_num in pairs(proc.sig.pending) do
+      if not proc.sig.blocked[sig_num] then
+        return sig_num
+      end
+    end
+    return nil
+  end
+
+  -- Kill a process by signal. pid: positive = specific, 0 = own group,
+  -- -1 = all except self (root only). sig 0 = existence check.
   function M.kill(proc, pid, sig)
+    sig = sig or 15  -- default SIGTERM
+    if pid == 0 then
+      for _, p in pairs(processes) do
+        if p.pgid == proc.pgid and p.pid ~= proc.pid then
+          M.send_signal(p, sig)
+        end
+      end
+      return true
+    end
+    if pid == -1 then
+      if proc.uid ~= 0 then return nil, "permission denied" end
+      for _, p in pairs(processes) do
+        if p.pid ~= proc.pid then
+          M.send_signal(p, sig)
+        end
+      end
+      return true
+    end
     local target = processes[pid]
     if not target then return nil, "no such process" end
     -- permission: same uid or root
@@ -152,19 +246,7 @@ return function(K)
     if sig == 0 then
       return true -- signal 0 = existence check
     end
-    if sig == 9 or sig == 15 or sig == 2 then
-      target.state = "zombie"
-      target.exitcode = 128 + (sig or 0)
-      target.exitstatus = { "killed", sig }
-      M.notify_parent(target)
-    elseif sig == 17 then -- SIGSTOP
-      target.state = "stopped"
-    elseif sig == 19 then -- SIGCONT
-      if target.state == "stopped" then
-        K.sched.enqueue(target)
-      end
-    end
-    return true
+    return M.send_signal(target, sig)
   end
 
   -- Die from an error/signal (uncaught error -> SIGSEGV)
@@ -198,6 +280,9 @@ return function(K)
   function M.set_init(pid)
     init_pid = pid
   end
+
+  -- Alarm timer map (timer id -> proc); read by sched.lua event dispatch
+  M.alarm_timers = alarm_timers
 
   -- Snapshot for /proc
   function M.snapshot()
