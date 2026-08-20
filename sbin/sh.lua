@@ -209,7 +209,7 @@ else
 end
 print("READY")  -- diag: any output after clear() must render below banner
 while true do
-  print("sh# ")
+  write(1, "sh# ")
   local line = readline(console, true)
   if not line then break end
   local ok, err = pcall(run_line, line)

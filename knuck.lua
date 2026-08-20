@@ -85,14 +85,13 @@ function K.term_write(s)
     local cx, cy = t.getCursorPos()
     local col = cx or 1
     if seg:find("\b", 1, true) then
-      -- char-by-char (backspace present): \b moves cursor back and erases
+      -- char-by-char (backspace present): \b moves cursor back one column
+      -- (the caller's following space erases the char)
       for i = 1, #seg do
         local ch = seg:sub(i, i)
         if ch == "\b" then
           col = col - 1
           if col < 1 then col = 1 end
-          t.setCursorPos(col, cy)
-          t.write(" ")
           t.setCursorPos(col, cy)
         else
           t.write(ch)
