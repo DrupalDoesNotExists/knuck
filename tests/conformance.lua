@@ -128,15 +128,24 @@ end
 
 -- 1.6 math functions (5.2 set; pow/log10/atan2/cosh/sinh/tanh are 5.1-only)
 local math_funcs = { "abs", "ceil", "floor", "max", "min", "random", "randomseed",
-  "sqrt", "sin", "cos", "tan", "log", "exp", "fmod", "modf", "deg", "rad", "huge", "pi" }
+  "sqrt", "sin", "cos", "tan", "log", "exp", "fmod", "modf", "deg", "rad" }
 missing = {}
 for _, f in ipairs(math_funcs) do
   if not libfn(math, f) then missing[#missing + 1] = f end
 end
-if #missing == 0 then
-  ok("math.api", "all core functions present")
+-- math constants (numbers, not functions)
+local math_consts = { "huge", "pi" }
+local missing_consts = {}
+for _, c in ipairs(math_consts) do
+  if type(math[c]) ~= "number" then missing_consts[#missing_consts + 1] = c end
+end
+if #missing == 0 and #missing_consts == 0 then
+  ok("math.api", "all core functions and constants present")
 else
-  limited("math.api", "missing: " .. table.concat(missing, ", "))
+  local parts = {}
+  if #missing > 0 then parts[#parts + 1] = "funcs: " .. table.concat(missing, ", ") end
+  if #missing_consts > 0 then parts[#parts + 1] = "consts: " .. table.concat(missing_consts, ", ") end
+  limited("math.api", table.concat(parts, "; "))
 end
 
 -- 1.7 coroutine
@@ -294,7 +303,7 @@ end
 
 -- fs handle methods (close/read/write/seek are handle methods, not fs.*)
 probe("fs.handle", function()
-  local h = fs.open("/tmp/knuck_handle.txt", "w")
+  local h = fs.open("/tmp/knuck_handle.txt", "w+")
   if not h then error("open failed") end
   local methods = { "close", "read", "write", "seek", "readAll", "readLine", "writeLine" }
   local miss = {}
