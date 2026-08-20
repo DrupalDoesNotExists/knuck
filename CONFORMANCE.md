@@ -270,8 +270,8 @@
 
 | # | Requirement | Spec ref | Status | Evidence | Notes |
 |---|-------------|----------|--------|----------|-------|
-| 151 | man pages for every syscall — part of distribution | §7 | DONE | docs/man/man2/*.2 (81 pages); tools/install.lua installs | Generated for all 81 syscalls |
-| 152 | Stored in VFS (e.g., `/usr/share/man/man2/`) | §7 | DONE | tools/install.lua installs to usr/share/man/man2/ | |
+| 151 | man pages for every syscall — part of distribution | §7 | DONE | share/man/man2/*.2 (81 pages) | Generated for all 81 syscalls; distros install them |
+| 152 | Stored in VFS (e.g., `/usr/share/man/man2/`) | §7 | DONE | share/man/man2/ in repo; distros place into VFS | |
 | 153 | Readable by userspace `man` command | §7 | DONE | fsroot /knuck/sbin/man.lua | Userspace man command reads /usr/share/man/man2/ |
 | 154 | Format: plain text/roff-like; kernel stores, userspace renders | §7 | DONE | docs/man/man2/*.2 (NAME/SYNOPSIS/DESCRIPTION/RETURN/SEE ALSO) | Plain-text roff-like format |
 
