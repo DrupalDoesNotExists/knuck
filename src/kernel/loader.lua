@@ -43,4 +43,9 @@ function M.reset()
   loaded = {}
 end
 
+-- Drop a single module from the cache (used by rmmod).
+function M.unload(path)
+  loaded[path] = nil
+end
+
 return M

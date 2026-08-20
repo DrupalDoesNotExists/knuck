@@ -12,6 +12,19 @@
 return function(K)
   local M = {}
 
+  M.recv_timeouts = {}          -- timer id -> socket (SO_RCVTIMEO)
+
+  -- Timer event handler: wakes a recv waiter with nil (timeout). Returns true
+  -- if the timer was one of ours. Called from sched.lua event dispatch.
+  function M.recv_timeout_fired(timer_id)
+    local s = M.recv_timeouts[timer_id]
+    if not s then return false end
+    M.recv_timeouts[timer_id] = nil
+    s.rcv_timeout_timer = nil
+    K.sched.wake("recv", s, nil)
+    return true
+  end
+
   local pipes = {}              -- pipe objects
   local unix_sockets = {}       -- path -> listening socket
   local next_sock = 1
@@ -447,10 +460,13 @@ return function(K)
     return M.pipe_write(proc, { type = "pipe_w", pipe = out }, data)
   end
 
-  -- Receive on a socket (blocks)
-  function M.socket_recv(proc, fd, n)
+  -- Receive on a socket (blocks unless MSG_DONTWAIT)
+  -- flags: MSG_DONTWAIT=1 (return nil if no data), MSG_PEEK=2 (don't consume)
+  function M.socket_recv(proc, fd, n, flags)
     local s = fd.sock
     if s.closed then return nil end
+    local dontwait = flags and (flags % 2 == 1) or false
+    local peek = flags and (math.floor(flags / 2) % 2 == 1) or false
     if s.domain == "http" then
       -- AF_HTTP: recv returns the response body (or error)
       if s.http_response then
@@ -473,13 +489,26 @@ return function(K)
     end
     if s.socktype == "datagram" then
       if #s.queue > 0 then
-        return table.remove(s.queue, 1)
+        local d = s.queue[1]
+        if not peek then table.remove(s.queue, 1) end
+        return d
       end
+      if dontwait then return nil end
       -- block until a datagram arrives; on wake, re-read the queue
       s.recv_waiters = s.recv_waiters or {}
       s.recv_waiters[proc] = true
+      if s.rcvtimeo and s.rcvtimeo > 0 then
+        local tid = K.env.os.startTimer(s.rcvtimeo)
+        s.rcv_timeout_timer = tid
+        M.recv_timeouts[tid] = s
+      end
       K.sched.wait(proc, "recv", s, function()
         s.recv_waiters[proc] = nil
+        if s.rcv_timeout_timer then
+          K.env.os.cancelTimer(s.rcv_timeout_timer)
+          M.recv_timeouts[s.rcv_timeout_timer] = nil
+          s.rcv_timeout_timer = nil
+        end
         if #s.queue > 0 then return table.remove(s.queue, 1) end
         return nil
       end)

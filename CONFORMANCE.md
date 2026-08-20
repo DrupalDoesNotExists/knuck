@@ -47,7 +47,7 @@
 | # | Requirement | Spec ref | Status | Evidence | Notes |
 |---|-------------|----------|--------|----------|-------|
 | 12 | Each process loads with its own _ENV (sandbox); os/fs/term lexically unreachable | §3 | DONE | proc.lua:28-76 (make_env); proc.lua:82-86 (load_process with env) | Confirmed by diag.lua sandbox check |
-| 13 | Process env: only syscall wrappers + safe stdlib (string/math/table/coroutine/bit) | §3 | PARTIAL | proc.lua:21 `SAFE_LIBS = { "string", "math", "table", "coroutine" }` | **`bit` missing from SAFE_LIBS** (spec §3 line 47 lists `bit`) |
+| 13 | Process env: only syscall wrappers + safe stdlib (string/math/table/coroutine/bit) | §3 | DONE | proc.lua:21 `SAFE_LIBS = { "string", "math", "table", "coroutine", "bit" }` | `bit` added to SAFE_LIBS |
 | 14 | Escapism plugged: io, os, debug, package removed; load/loadstring inherit caller env | §3 | DONE | proc.lua:28-38 (env only adds safe libs + basic fns); no io/os/debug/package | |
 | 15 | Syscall discipline: no internal tables returned as-is — only copies | §3 | DONE | readdir returns flat string arrays; stat returns plain tables; no handle leaking | Syscall results are value types |
 
@@ -57,7 +57,7 @@
 |---|-------------|----------|--------|----------|-------|
 | 16 | Preemption by quanta: count-hook fires every N instructions → yield → kernel requeues | §4 | DONE | sched.lua:21 (QUANTUM=1000); sched.lua:108-111 (sethook + yield) | Context preserved via coroutine |
 | 17 | Priorities: getpriority/setpriority, range −20..19, lower=higher (POSIX) | §4 | DONE | syscall.lua:263-276; sched.lua:49 (dequeue picks lowest priority) | |
-| 18 | Policies: sched_setscheduler — "rr"\|"fifo"\|"other" | §4 | MISSING | **No `sched_setscheduler` syscall registered** | Policy system not implemented at all |
+| 18 | Policies: sched_setscheduler — "rr"\|"fifo"\|"other" | §4 | DONE | syscall.lua sched_setscheduler; proc.lua sched_policy | Policy stored per-process; validated rr/fifo/other |
 | 19 | States: running \| ready \| waiting \| stopped \| zombie \| dead | §4 | DONE | proc.lua:110 (state="ready"); sched.lua:41,105 (ready,running); proc.lua:170 (zombie); proc.lua:186 (stopped) | `dead` state exists in spec comment only (proc.lua:7) |
 | 20 | Zombie: killed process holds exit code until waitpid; orphans adopted by init (pid 1) | §4 | DONE | proc.lua:169-174 (exit→zombie); proc.lua:264-276 (notify_parent, orphan adoption) | |
 | 21 | Uncaught error → death as SIGSEGV; kernel logs error text | §4 | DONE | sched.lua:122-126 (error → die("SIGSEGV", req)); proc.lua:258 (K.log with detail) | |
@@ -74,14 +74,14 @@
 | 27 | exit(code) | §5.1 | DONE | syscall.lua:88-90 | |
 | 28 | waitpid(pid, opt?) → pid,status; opt="nohang"; pid=-1 any child | §5.1 | DONE | syscall.lua:183-197 | WNOHANG and pid=-1 both work |
 | 29 | kill(pid, sig); own uid or root; -1 all except self; 0 own group | §5.1 | DONE | proc.lua:221-250 | Permission checks present |
-| 30 | getpgrp() / setpgid(pid, pgid) | §5.1 | PARTIAL | syscall.lua:84 (getpgrp registered); **setpgid not registered** | getpgrp DONE, **setpgid MISSING** |
+| 30 | getpgrp() / setpgid(pid, pgid) | §5.1 | DONE | syscall.lua:84 (getpgrp); syscall.lua setpgid | Both registered; setpgid sets proc.pgid |
 | 31 | alarm(secs) — SIGALRM | §5.1 | DONE | syscall.lua:243-255; sched.lua:182-188 (timer→SIGALRM delivery) | Cancel+reschedule works |
 | 32 | signal(sig, handler\|nil\|"ignore") — sigaction(2) analog | §5.1 | DONE | syscall.lua:205-219 | SIGKILL/SIGSTOP rejection present |
 | 33 | sigprocmask(how, set?) — block/unblock signals | §5.1 | DONE | syscall.lua:222-240 | block/unblock/set modes; KILL/STOP never blocked |
 | 34 | sched_yield() | §5.1 | DONE | syscall.lua:258-260 | |
 | 35 | sleep(secs) — float seconds | §5.1 | DONE | syscall.lua:93-96 | Blocks via timer |
 | 36 | getpriority(pid?) / setpriority(pid?, prio) | §5.1 | DONE | syscall.lua:263-276 | Permission check present |
-| 37 | sched_setscheduler(pid?, policy) — "rr"\|"fifo"\|"other" | §5.1 | MISSING | **Not registered as syscall** | |
+| 37 | sched_setscheduler(pid?, policy) — "rr"\|"fifo"\|"other" | §5.1 | DONE | syscall.lua sched_setscheduler | Registered; sets proc.sched_policy |
 | 38 | chdir(path) / getcwd() | §5.1 | DONE | syscall.lua:283-290 (chdir); syscall.lua:85 (getcwd) | chdir checks dir + x permission |
 | 39 | umask(mask?) | §5.1 | DONE | syscall.lua:411-413; vfs.lua:659-663 | Returns old mask |
 
@@ -89,8 +89,8 @@
 
 | # | Requirement | Spec ref | Status | Evidence | Notes |
 |---|-------------|----------|--------|----------|-------|
-| 40 | Signal numbers: HUP=1, INT=2, QUIT=3, KILL=9, USR1=10, USR2=12, PIPE=13, ALRM=14, TERM=15, CHLD=17, CONT=18, STOP=19 | §5.1 | PARTIAL | Numbers used inline (9,13,14,15,17,18,19); **no symbolic constants exported to userspace** | Numeric values work; no named constants |
-| 41 | SIGCHLD: notification to parent on child completion, unblocks waitpid | §5.1 | PARTIAL | proc.lua:264-276 (`notify_parent` wakes parent via `sched.wake("child",...)`) | Functionally works but **no actual SIGCHLD signal delivered to parent** — just a waitpid wake |
+| 40 | Signal numbers: HUP=1, INT=2, QUIT=3, KILL=9, USR1=10, USR2=12, PIPE=13, ALRM=14, TERM=15, CHLD=17, CONT=18, STOP=19 | §5.1 | DONE | proc.lua make_env exports `signals` table | Named constants exported to userspace env |
+| 41 | SIGCHLD: notification to parent on child completion, unblocks waitpid | §5.1 | DONE | proc.lua notify_parent wakes waitpid + queues SIGCHLD(17) to parent handler | Both waitpid wake and real SIGCHLD delivery |
 | 42 | SIGPIPE: write to pipe without reader → signal, default = termination | §5.1 | DONE | ipc.lua:98-100 (send_signal(proc, 13) on write to closed pipe) | |
 | 43 | SIGKILL/SIGSTOP — not blockable | §5.1 | DONE | syscall.lua:206-207 (rejects handler change); proc.lua:180-188 (immediate death/stop) | |
 
@@ -118,14 +118,14 @@
 | 56 | listen(fd, backlog) | §5.3 | DONE | ipc.lua:251-257 | |
 | 57 | accept(fd) → fd — blocking | §5.3 | DONE | ipc.lua:263-281; syscall.lua:520-532 | Blocks until connection arrives |
 | 58 | connect(fd, addr) | §5.3 | DONE | ipc.lua:284-318 | Unix, HTTP supported; modem uses sendto instead |
-| 59 | send(fd, data, flags?) → n | §5.3 | PARTIAL | ipc.lua:337-360 | **`flags` parameter accepted but ignored** |
-| 60 | recv(fd, len?, flags?) → data\|nil | §5.3 | PARTIAL | ipc.lua:363-393 | **`flags` parameter accepted but ignored** |
+| 59 | send(fd, data, flags?) → n | §5.3 | DONE | syscall.lua send; ipc.lua socket_send | flags param accepted and passed |
+| 60 | recv(fd, len?, flags?) → data\|nil | §5.3 | DONE | syscall.lua recv; ipc.lua socket_recv | flags: MSG_DONTWAIT=1, MSG_PEEK=2 honored |
 | 61 | close(fd) | §5.3 | DONE | syscall.lua:319-325 | |
 | 62 | shutdown(fd, "read"\|"write"\|"both") | §5.3 | DONE | syscall.lua shutdown; ipc.lua socket_shutdown | Honors read/write/both (pipe ends for unix, FIN for TCP) |
 | 63 | getsockname(fd) → addr | §5.3 | DONE | syscall.lua:577-581 | Returns fd.sock.path |
 | 64 | getpeername(fd) → addr | §5.3 | DONE | syscall.lua:584-588 | Returns fd.sock.peer |
-| 65 | setsockopt(fd, opt, val) — SO_REUSEADDR, SO_BROADCAST, SO_RCVTIMEO… | §5.3 | PARTIAL | syscall.lua:591-599 | **Only SO_BROADCAST implemented**; SO_REUSEADDR and SO_RCVTIMEO missing |
-| 66 | getsockopt(fd, opt) → val | §5.3 | PARTIAL | syscall.lua:600-607 | **Only SO_BROADCAST implemented** |
+| 65 | setsockopt(fd, opt, val) — SO_REUSEADDR, SO_BROADCAST, SO_RCVTIMEO… | §5.3 | DONE | syscall.lua setsockopt | SO_REUSEADDR(2), SO_BROADCAST(6), SO_RCVTIMEO(20) all implemented |
+| 66 | getsockopt(fd, opt) → val | §5.3 | DONE | syscall.lua getsockopt | SO_REUSEADDR, SO_BROADCAST, SO_RCVTIMEO readable |
 | 67 | select(reads?, writes?, timeout?) → n, r, w | §5.3 | DONE | syscall.lua:434-464 | Returns r,w,e tables; SPEC.md aligned to impl (decision A) |
 | 68 | poll(fds, timeout?) → n | §5.3 | DONE | syscall.lua:467-495 | Returns table of ready fds; SPEC.md aligned to impl (decision B) |
 | 69 | Sockets as FD: read/write/close work on them | §5.3 | DONE | vfs.lua read/write dispatch | Socket fds dispatch to recv/send for connected STREAM sockets (decision I) |
@@ -189,9 +189,9 @@
 
 | # | Requirement | Spec ref | Status | Evidence | Notes |
 |---|-------------|----------|--------|----------|-------|
-| 110 | `/sys/kernel/*` — quantum, priorities | §5.4 | PARTIAL | vfs.lua:200-201 (`/sys/kernel` lists "version", "scheduler") | **Missing `/sys/kernel/quantum` and `/sys/kernel/priority`** files |
+| 110 | `/sys/kernel/*` — quantum, priorities | §5.4 | DONE | vfs.lua sys_list/sys_read/sys_write | `/sys/kernel/quantum` + `/sys/kernel/priority` read/write |
 | 111 | `/sys/net/*` — IP config, ARP cache, routes | §5.4 | DONE | vfs.lua:202-204 (ip, gateway, netmask, arp, routes, channel) | All listed; writable for config |
-| 112 | `/sys/modules/*` — loaded modules, status; write = kernel config | §5.4 | PARTIAL | vfs.lua:215-219 (lists K.modules keys) | **K.modules is never populated** — no insmod/rmmod; always empty. Write path not implemented |
+| 112 | `/sys/modules/*` — loaded modules, status; write = kernel config | §5.4 | DONE | vfs.lua sys_read/sys_write; syscall.lua insmod/rmmod | K.modules populated; write `load <path>` / `unload <name>` |
 
 ## 5.4 /proc Structure (SPEC §5.4 continued)
 
@@ -199,8 +199,8 @@
 |---|-------------|----------|--------|----------|-------|
 | 113 | `/proc/<pid>/status` | §5.4 | DONE | vfs.lua:182-185 (reads name, state, pid, ppid, uid, priority) | |
 | 114 | `/proc/<pid>/cmdline` | §5.4 | DONE | vfs.lua:186-187 | Returns process name |
-| 115 | `/proc/<pid>/fd` | §5.4 | PARTIAL | vfs.lua:188-189 | **Hardcoded** "0\tconsole\n1\tconsole\n2\tconsole\n" — doesn't reflect actual open fds |
-| 116 | `/proc/<pid>/mem` | §5.4 | PARTIAL | vfs.lua:190-191 | Returns "0\n" — stub, no real memory info |
+| 115 | `/proc/<pid>/fd` | §5.4 | DONE | vfs.lua proc_read fd | Lists actual open fds from proc snapshot |
+| 116 | `/proc/<pid>/mem` | §5.4 | DONE | vfs.lua proc_read mem | Estimates resident memory from fds/env |
 | 117 | `/proc/uptime` | §5.4 | DONE | vfs.lua:165-166 (returns os.clock()) | |
 | 118 | `/proc/version` | §5.4 | DONE | vfs.lua:167-168 | |
 
@@ -208,10 +208,10 @@
 
 | # | Requirement | Spec ref | Status | Evidence | Notes |
 |---|-------------|----------|--------|----------|-------|
-| 119 | insmod(path) → ok — load driver module | §5.5 | MISSING | **No `insmod` syscall registered**; no dynamic module loading | |
-| 120 | rmmod(name) → ok — unload module | §5.5 | MISSING | **No `rmmod` syscall registered**; no module unloading | |
-| 121 | Module list at start from `/boot/knuck.conf` | §5.5 | MISSING | **No knuck.conf file in repo**; boot.lua hardcodes module load order | |
-| 122 | Hotplug: kernel detects attach, event → /dev/devctl; mount decision = userspace | §5.5 | PARTIAL | sched.lua:206-208 (peripheral event → wake devctl); vfs.lua:39-54 (devctl read blocks) | Event delivered but **no structured format** (just raw `peripheral` event); no detach event handling |
+| 119 | insmod(path) → ok — load driver module | §5.5 | DONE | syscall.lua insmod; loader.lua unload | Dynamic module loading via loader; root-only |
+| 120 | rmmod(name) → ok — unload module | §5.5 | DONE | syscall.lua rmmod; loader.lua unload | Module unloading clears K.modules + loader cache; root-only |
+| 121 | Module list at start from `/boot/knuck.conf` | §5.5 | DONE | boot.lua knuck.conf parser; loader.lua | `module <path>` lines loaded at boot |
+| 122 | Hotplug: kernel detects attach, event → /dev/devctl; mount decision = userspace | §5.5 | DONE | sched.lua peripheral dispatch | Structured events: `attach <side>` / `detach <side>` |
 
 ## 5.6 Network (SPEC §5.6)
 
@@ -232,7 +232,7 @@
 
 | # | Requirement | Spec ref | Status | Evidence | Notes |
 |---|-------------|----------|--------|----------|-------|
-| 133 | ioctl(fd, cmd, ...) — device control | §5.7 | PARTIAL | syscall.lua:614-619 | **Only `tty_switch` command implemented**; no terminal mode ioctls |
+| 133 | ioctl(fd, cmd, ...) — device control | §5.7 | DONE | syscall.lua ioctl | tty_switch + console_mode (cooked/raw) implemented |
 | 134 | `/dev/console`: cooked (strings on Enter) by default, raw (events) via ioctl | §5.7 | DONE | tty.lua; syscall.lua ioctl | Cooked default + raw via ioctl console_mode |
 | 135 | Terminal modes via ioctl on console | §5.7 | DONE | syscall.lua ioctl console_mode | cooked/raw switching implemented |
 
@@ -244,22 +244,22 @@
 | 137 | clock() → cpu_secs — process CPU time | §5.8 | DONE | syscall.lua:280 (delegates to os.clock()) | Returns wall-clock time, not true CPU time (CC limitation) |
 | 138 | sleep(secs) | §5.8 | DONE | syscall.lua:93-96 | (Also in §5.1 #35) |
 | 139 | alarm(secs) | §5.8 | DONE | syscall.lua:243-255 | (Also in §5.1 #31) |
-| 140 | clock_gettime(clock) → secs, nsecs — CLOCK_REALTIME \| CLOCK_MONOTONIC | §5.8 | MISSING | **No `clock_gettime` syscall registered** | |
+| 140 | clock_gettime(clock) → secs, nsecs — CLOCK_REALTIME \| CLOCK_MONOTONIC | §5.8 | DONE | syscall.lua clock_gettime | CLOCK_REALTIME=0 (os.time), CLOCK_MONOTONIC=1 (os.clock) |
 
 ## 5.9 Power (SPEC §5.9)
 
 | # | Requirement | Spec ref | Status | Evidence | Notes |
 |---|-------------|----------|--------|----------|-------|
-| 141 | reboot() → ok — reboot(8) | §5.9 | MISSING | **No `reboot` syscall registered** (CC has os.reboot but kernel doesn't expose it) | |
-| 142 | halt() → ok — halt(8) | §5.9 | MISSING | **No `halt` syscall registered** (CC has os.shutdown but kernel doesn't expose it) | |
+| 141 | reboot() → ok — reboot(8) | §5.9 | DONE | syscall.lua reboot | os.reboot via kernel; root-only |
+| 142 | halt() → ok — halt(8) | §5.9 | DONE | syscall.lua halt | os.shutdown via kernel; root-only |
 | 143 | `shutdown(fd, how)` is socket syscall, not power | §5.9 | DONE | syscall.lua:570-574 | (Documented as distinct from power) |
 
 ## 6. Boot (SPEC §6)
 
 | # | Requirement | Spec ref | Status | Evidence | Notes |
 |---|-------------|----------|--------|----------|-------|
-| 144 | `/boot/knuck.conf`: module list + init path + kernel params | §6 | MISSING | **No knuck.conf file exists** in repo; no config parser | boot.lua hardcodes everything |
-| 145 | Kernel loads modules per config, launches pid 1 with root creds | §6 | PARTIAL | boot.lua:198 (spawn init with uid=0 gid=0) | **Init path hardcoded** (`/knuck/sbin/init.lua`), not from config |
+| 144 | `/boot/knuck.conf`: module list + init path + kernel params | §6 | DONE | boot.lua knuck.conf parser | `module <path>` + `init <path>` lines parsed |
+| 145 | Kernel loads modules per config, launches pid 1 with root creds | §6 | DONE | boot.lua knuck.conf parser + spawn init | Init path from config (default /knuck/sbin/init.lua), uid=0 gid=0 |
 | 146 | init works per init.rc (Android-style: services, actions) | §6 | DONE | userspace/init.lua:24-48 (parses `service <name> <path>`) | |
 | 147 | Boot-time self-diagnostics: before init, check platform capabilities | §6 | DONE | diag.lua:41-63; boot.lua:147-149 (runs diag before core modules) | |
 | 148 | Results written to /proc/selfcheck and log | §6 | DONE | vfs.lua:169-175 (/proc/selfcheck readable); boot.lua:186-195 (banner output) | |
@@ -292,9 +292,9 @@
 
 | Status | Count |
 |--------|-------|
-| **DONE** | 123 |
-| **PARTIAL** | 18 |
-| **MISSING** | 15 |
+| **DONE** | 147 |
+| **PARTIAL** | 3 |
+| **MISSING** | 6 |
 | **N/A** | 7 |
 | **Total requirements** | **163** |
 
@@ -302,43 +302,20 @@
 
 | # | Requirement | Spec ref | Notes |
 |---|-------------|----------|-------|
-| 18 | sched_setscheduler(pid?, policy) — "rr"\|"fifo"\|"other" | §4, §5.1 | Scheduler policy system entirely absent |
-| 30b | setpgid(pid, pgid) | §5.1 | getpgrp exists but setpgid not registered |
-| 37 | sched_setscheduler(pid?, policy) | §5.1 | (Same as #18, listed in syscall table) |
-| 92 | fstype floppy/hdd | §5.4 | No disk drive filesystem type |
-| 100 | /mnt/disk0..N auto-mount | §5.4 | No auto-mount on peripheral attach |
-| 119 | insmod(path) syscall | §5.5 | No module loading |
-| 120 | rmmod(name) syscall | §5.5 | No module unloading |
-| 121 | /boot/knuck.conf config file | §5.5, §6 | No config file or parser |
-| 140 | clock_gettime(clock) → secs, nsecs | §5.8 | Not registered |
-| 141 | reboot() syscall | §5.9 | Not registered |
-| 142 | halt() syscall | §5.9 | Not registered |
-| 151 | Man pages for every syscall | §7 | No man pages |
-| 152 | /usr/share/man/man2/ in VFS | §7 | No man directory |
-| 153 | `man` userspace command | §7 | No man command |
-| 154 | Man page format (plain text/roff) | §7 | Nothing to format |
+| 92 | fstype floppy/hdd | §5.4 | No disk drive filesystem type (P5) |
+| 100 | /mnt/disk0..N auto-mount | §5.4 | No auto-mount on peripheral attach (P5) |
+| 151 | Man pages for every syscall | §7 | No man pages (P5) |
+| 152 | /usr/share/man/man2/ in VFS | §7 | No man directory (P5) |
+| 153 | `man` userspace command | §7 | No man command (P5) |
+| 154 | Man page format (plain text/roff) | §7 | Nothing to format (P5) |
 
 ### Every PARTIAL item (needs completion)
 
 | # | Requirement | Spec ref | What's missing |
 |---|-------------|----------|----------------|
-| 13 | Process env safe stdlib includes `bit` | §3 | `bit` not in SAFE_LIBS (proc.lua:21) |
-| 30a | getpgrp() | §5.1 | Exists but paired setpgid missing |
-| 40 | Signal number constants exported | §5.1 | Numbers work inline; no named constants for userspace |
-| 41 | SIGCHLD signal delivery to parent | §5.1 | Only wakes waitpid; no actual signal #17 queued |
-| 55 | bind(fd, addr) for HTTP | §5.3 | HTTP bind not implemented |
-| 59 | send flags parameter | §5.3 | Flags accepted but ignored |
-| 60 | recv flags parameter | §5.3 | Flags accepted but ignored |
-| 65 | setsockopt — SO_REUSEADDR, SO_RCVTIMEO | §5.3 | Only SO_BROADCAST implemented |
-| 66 | getsockopt — full options | §5.3 | Only SO_BROADCAST |
-| 85 | link(old, new) — true hardlink | §5.4 | Copy+delete, not inode-sharing |
-| 110 | /sys/kernel/quantum, /sys/kernel/priority | §5.4 | Only version + scheduler |
-| 112 | /sys/modules/* with status, writable | §5.4 | K.modules empty; no write handling |
-| 115 | /proc/<pid>/fd — actual open fd list | §5.4 | Hardcoded "0\tconsole\n1\tconsole\n2\tconsole\n" |
-| 116 | /proc/<pid>/mem — memory info | §5.4 | Stub returning "0\n" |
-| 122 | Hotplug — structured event format | §5.5 | Raw CC event passed, no KNUCK format |
-| 133 | ioctl — more than tty_switch | §5.7 | Only tty_switch |
-| 157 | conformance.lua tests KNUCK syscalls | §8 | Tests CraftOS APIs, not kernel syscalls |
+| 55 | bind(fd, addr) for HTTP | §5.3 | HTTP bind not implemented (http only has connect) |
+| 85 | link(old, new) — true hardlink | §5.4 | Copy+delete, not inode-sharing (platform CUT candidate) |
+| 157 | conformance.lua tests KNUCK syscalls | §8 | Tests CraftOS APIs, not kernel syscalls (P5) |
 
 ---
 

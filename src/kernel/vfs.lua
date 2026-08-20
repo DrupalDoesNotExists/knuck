@@ -241,6 +241,19 @@ return function(K)
       end
       table.sort(parts)
       return table.concat(parts, "\n") .. "\n"
+    elseif rest == "kmsg" then
+      -- dmesg ring, drain-on-read (single consumer: syslogd)
+      local ring = K.log_ring or {}
+      local pos = K.kmsg_pos or 0
+      local lines = {}
+      if pos < #ring then
+        for i = pos + 1, #ring do lines[#lines + 1] = ring[i] end
+      end
+      K.kmsg_pos = #ring
+      return table.concat(lines, "\n") .. (#lines > 0 and "\n" or "")
+    elseif rest == "dmesg" then
+      -- full dmesg ring (repeatable)
+      return table.concat(K.log_ring or {}, "\n") .. "\n"
     end
     local pid = tonumber(rest:match("^(%d+)"))
     if not pid then return nil end
@@ -254,9 +267,20 @@ return function(K)
     elseif field == "cmdline" then
       return snap.name .. "\n"
     elseif field == "fd" then
-      return "0\tconsole\n1\tconsole\n2\tconsole\n"
+      local lines = {}
+      for fd, f in pairs(snap.fds or {}) do
+        local target = f.path or f.type or "?"
+        lines[#lines + 1] = fd .. "\t" .. target
+      end
+      table.sort(lines, function(a, b)
+        return tonumber(a:match("^(%d+)")) < tonumber(b:match("^(%d+)"))
+      end)
+      return table.concat(lines, "\n") .. "\n"
     elseif field == "mem" then
-      return "0\n"
+      -- rough resident estimate: fds + env + stack
+      local n = 0
+      for _ in pairs(snap.fds or {}) do n = n + 1 end
+      return tostring(n * 4 + 16) .. "\n"
     end
     return nil
   end
@@ -266,7 +290,7 @@ return function(K)
     if path == "/sys" then
       return { "kernel", "net", "modules" }
     elseif path == "/sys/kernel" then
-      return { "version", "scheduler" }
+      return { "version", "scheduler", "quantum", "priority" }
     elseif path == "/sys/net" then
       return { "ip", "gateway", "netmask", "arp", "routes", "channel" }
     end
@@ -280,6 +304,10 @@ return function(K)
       return "KNUCK " .. (K.selfcheck.craftos or "?") .. "\n"
     elseif rest == "kernel/scheduler" then
       return K.selfcheck.preempt and "preemptive\n" or "cooperative\n"
+    elseif rest == "kernel/quantum" then
+      return tostring(K.sched.QUANTUM) .. "\n"
+    elseif rest == "kernel/priority" then
+      return tostring(K.sched.default_priority or 0) .. "\n"
     elseif rest == "modules" then
       local parts = {}
       for name in pairs(K.modules) do parts[#parts + 1] = name end
@@ -316,7 +344,37 @@ return function(K)
     local rest = path:match("^/sys/(.+)$")
     if not rest then return nil, "read-only" end
     local value = data:gsub("%s+$", "")
-    if rest == "net/ip" then
+    if rest == "kernel/quantum" then
+      local q = tonumber(value)
+      if not q or q < 1 then return nil, "invalid quantum" end
+      K.sched.QUANTUM = q
+      return #data
+    elseif rest == "kernel/priority" then
+      local p = tonumber(value)
+      if not p or p < -20 or p > 19 then return nil, "invalid priority" end
+      K.sched.default_priority = p
+      return #data
+    elseif rest == "modules" then
+      local cmd, arg = value:match("^(%S+)%s+(.+)$")
+      if cmd == "load" and arg then
+        local ok, mod = pcall(K.loader.load, arg, K)
+        if not ok then return nil, tostring(mod) end
+        local name = arg:match("([^/]+)%.lua$") or arg
+        K.modules[name] = mod
+        K.module_paths = K.module_paths or {}
+        K.module_paths[name] = arg
+        return #data
+      elseif cmd == "unload" and arg then
+        if not K.modules[arg] then return nil, "no such module" end
+        K.modules[arg] = nil
+        if K.module_paths and K.module_paths[arg] then
+          K.loader.unload(K.module_paths[arg])
+          K.module_paths[arg] = nil
+        end
+        return #data
+      end
+      return nil, "usage: load <path> | unload <name>"
+    elseif rest == "net/ip" then
       local ip = K.net.str_to_ip(value)
       if not ip then return nil, "invalid ip" end
       K.net.ip = ip

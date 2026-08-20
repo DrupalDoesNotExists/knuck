@@ -279,6 +279,79 @@ return function(K)
   M.register("time", function() return K.env.os.time() end)
   M.register("clock", function() return K.env.os.clock() end)
 
+  -- clock_gettime(clock) -> secs, nsecs. CLOCK_REALTIME=0, CLOCK_MONOTONIC=1.
+  M.register("clock_gettime", function(proc, clock)
+    if clock == 1 then  -- CLOCK_MONOTONIC
+      local s = K.env.os.clock()
+      local secs = math.floor(s)
+      return secs, math.floor((s - secs) * 1e9)
+    end
+    -- CLOCK_REALTIME (default)
+    return K.env.os.time(), 0
+  end)
+
+  -- reboot() / halt() — power control via CC os API
+  M.register("reboot", function(proc)
+    if proc.uid ~= 0 then return nil, "permission denied" end
+    if K.env.os.reboot then K.env.os.reboot() end
+    return true
+  end)
+  M.register("halt", function(proc)
+    if proc.uid ~= 0 then return nil, "permission denied" end
+    if K.env.os.shutdown then K.env.os.shutdown() end
+    return true
+  end)
+
+  -- setpgid(pid, pgid) — set process group
+  M.register("setpgid", function(proc, pid, pgid)
+    local target = proc_mod.lookup(pid or proc.pid)
+    if not target then return nil, "no such process" end
+    if proc.uid ~= 0 and proc.uid ~= target.uid then
+      return nil, "permission denied"
+    end
+    target.pgid = pgid or target.pid
+    return true
+  end)
+
+  -- sched_setscheduler(pid?, policy) — "rr" | "fifo" | "other"
+  M.register("sched_setscheduler", function(proc, pid, policy)
+    local target = proc_mod.lookup(pid or proc.pid)
+    if not target then return nil, "no such process" end
+    if proc.uid ~= 0 and proc.uid ~= target.uid then
+      return nil, "permission denied"
+    end
+    if policy ~= "rr" and policy ~= "fifo" and policy ~= "other" then
+      return nil, "invalid policy"
+    end
+    target.sched_policy = policy
+    return true
+  end)
+
+  -- insmod(path) — load a kernel module at runtime (root only)
+  M.register("insmod", function(proc, path)
+    if proc.uid ~= 0 then return nil, "permission denied" end
+    if not path then return nil, "no path" end
+    local ok, mod = pcall(K.loader.load, path, K)
+    if not ok then return nil, tostring(mod) end
+    local name = path:match("([^/]+)%.lua$") or path
+    K.modules[name] = mod
+    K.module_paths = K.module_paths or {}
+    K.module_paths[name] = path
+    return true
+  end)
+
+  -- rmmod(name) — unload a kernel module (root only)
+  M.register("rmmod", function(proc, name)
+    if proc.uid ~= 0 then return nil, "permission denied" end
+    if not K.modules[name] then return nil, "no such module" end
+    K.modules[name] = nil
+    if K.module_paths and K.module_paths[name] then
+      K.loader.unload(K.module_paths[name])
+      K.module_paths[name] = nil
+    end
+    return true
+  end)
+
   -- chdir
   M.register("chdir", function(proc, path)
     local resolved = K.vfs.resolve(proc, path)
@@ -552,17 +625,17 @@ return function(K)
   end)
 
   -- send(fd, data)
-  M.register("send", function(proc, fdnum, data)
+  M.register("send", function(proc, fdnum, data, flags)
     local fd = proc.fds[fdnum]
     if not fd then return nil, "bad fd" end
-    return K.ipc.socket_send(proc, fd, data)
+    return K.ipc.socket_send(proc, fd, data, flags)
   end)
 
-  -- recv(fd, n)
-  M.register("recv", function(proc, fdnum, n)
+  -- recv(fd, n, flags) — flags: MSG_DONTWAIT=1, MSG_PEEK=2
+  M.register("recv", function(proc, fdnum, n, flags)
     local fd = proc.fds[fdnum]
     if not fd then return nil, "bad fd" end
-    return K.ipc.socket_recv(proc, fd, n)
+    return K.ipc.socket_recv(proc, fd, n, flags)
   end)
 
   -- sendto(fd, data, dest_ip, dest_port)  (AF_MODEM)
@@ -601,14 +674,24 @@ return function(K)
     return fd.sock.peer
   end)
 
-  -- setsockopt / getsockopt (SO_BROADCAST for AF_MODEM; HTTP options)
+  -- setsockopt / getsockopt (SO_BROADCAST, SO_REUSEADDR, SO_RCVTIMEO; HTTP options)
   -- HTTP level = 2: METHOD=1 (GET|POST), HEADERS=2 (table), BODY=3 (string)
   M.register("setsockopt", function(proc, fdnum, level, opt, val)
     local fd = proc.fds[fdnum]
     if not fd then return nil, "bad fd" end
-    if level == 1 and opt == 6 then  -- SOL_SOCKET, SO_BROADCAST
-      if fd.sock then fd.sock.broadcast = val == true or val == 1 end
-      return true
+    if level == 1 then  -- SOL_SOCKET
+      if opt == 2 then  -- SO_REUSEADDR
+        if fd.sock then fd.sock.reuseaddr = val == true or val == 1 end
+        return true
+      elseif opt == 20 then  -- SO_RCVTIMEO (seconds)
+        local t = tonumber(val)
+        if t and t < 0 then return nil, "invalid timeout" end
+        if fd.sock then fd.sock.rcvtimeo = t or 0 end
+        return true
+      elseif opt == 6 then  -- SO_BROADCAST
+        if fd.sock then fd.sock.broadcast = val == true or val == 1 end
+        return true
+      end
     end
     if fd.sock and fd.sock.domain == "http" and level == 2 then
       if opt == 1 then fd.sock.http_method = tostring(val or "GET"):upper(); return true
@@ -620,8 +703,14 @@ return function(K)
   M.register("getsockopt", function(proc, fdnum, level, opt)
     local fd = proc.fds[fdnum]
     if not fd then return nil, "bad fd" end
-    if level == 1 and opt == 6 and fd.sock then  -- SO_BROADCAST
-      return fd.sock.broadcast and 1 or 0
+    if level == 1 and fd.sock then  -- SOL_SOCKET
+      if opt == 2 then  -- SO_REUSEADDR
+        return fd.sock.reuseaddr and 1 or 0
+      elseif opt == 20 then  -- SO_RCVTIMEO
+        return fd.sock.rcvtimeo or 0
+      elseif opt == 6 then  -- SO_BROADCAST
+        return fd.sock.broadcast and 1 or 0
+      end
     end
     return nil
   end)

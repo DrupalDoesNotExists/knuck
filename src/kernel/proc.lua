@@ -18,7 +18,7 @@ return function(K)
   local alarm_timers = {}       -- CC timer id -> proc (alarm() SIGALRM delivery)
 
   -- Safe stdlibs exposed to processes
-  local SAFE_LIBS = { "string", "math", "table", "coroutine" }
+  local SAFE_LIBS = { "string", "math", "table", "coroutine", "bit" }
 
   function M.init(K)
     -- nothing yet
@@ -72,6 +72,11 @@ return function(K)
         return res
       end
     end
+    -- signal number constants (POSIX) for userspace
+    env.signals = {
+      HUP = 1, INT = 2, QUIT = 3, KILL = 9, USR1 = 10, USR2 = 12,
+      PIPE = 13, ALRM = 14, TERM = 15, CHLD = 17, CONT = 18, STOP = 19,
+    }
     return env
   end
 
@@ -104,6 +109,7 @@ return function(K)
       egid = gid or 0,
       pgid = pid,
       priority = 0,
+      sched_policy = "other",  -- "rr" | "fifo" | "other"
       cwd = "/",
       root = "/",
       umask = 0x12,  -- 0022 octal
@@ -267,6 +273,12 @@ return function(K)
     local parent = processes[proc.ppid]
     if parent then
       K.sched.wake("child", proc.ppid, reap)
+      -- SIGCHLD (17): deliver to parent if it installed a handler
+      if parent.sig and parent.sig.handlers[17] and
+         parent.sig.handlers[17] ~= "ignore" and
+         not parent.sig.blocked[17] then
+        parent.sig.pending[17] = true
+      end
     else
       -- orphan: adopt by init
       if init_pid and processes[init_pid] then
@@ -295,6 +307,7 @@ return function(K)
         ppid = p.ppid,
         uid = p.uid,
         priority = p.priority,
+        fds = p.fds,
       }
     end
     return out

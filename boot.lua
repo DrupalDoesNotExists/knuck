@@ -43,8 +43,15 @@ K.bit = {
   end,
 }
 
--- Kernel log (writes to stderr/console)
+-- Kernel log (writes to stderr/console + dmesg ring buffer)
+K.log_ring = {}   -- dmesg ring (FIFO, capped)
+K.log_ring_max = 200
 function K.log(msg)
+  local line = "[" .. tostring(os.time()) .. "] " .. tostring(msg)
+  table.insert(K.log_ring, line)
+  if #K.log_ring > K.log_ring_max then
+    table.remove(K.log_ring, 1)
+  end
   term.setTextColor(colors.yellow)
   K.term_write("[k] " .. tostring(msg) .. "\n")
   term.setTextColor(colors.white)
@@ -168,6 +175,29 @@ K.sched.init(K)
 
 -- 5. Mount VFS
 K.vfs.mount_root()
+
+-- 5a. Load /boot/knuck.conf (extra modules + init path)
+local init_path = "/knuck/sbin/init.lua"
+local ok_conf, conf = pcall(K.fs.read_all, "/boot/knuck.conf")
+if ok_conf and conf then
+  for line in (conf .. "\n"):gmatch("([^\n]*)\n") do
+    line = line:gsub("^%s+", ""):gsub("%s+$", "")
+    if line ~= "" and not line:match("^#") then
+      local cmd, arg = line:match("^(%S+)%s+(.+)$")
+      if cmd == "module" and arg then
+        local okm, mod = pcall(K.loader.load, arg, K)
+        if okm then
+          local name = arg:match("([^/]+)%.lua$") or arg
+          K.modules[name] = mod
+          K.module_paths = K.module_paths or {}
+          K.module_paths[name] = arg
+        end
+      elseif cmd == "init" and arg then
+        init_path = arg
+      end
+    end
+  end
+end
 
 -- 5b. Init network (gracefully disables if no modem)
 K.net.init()

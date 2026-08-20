@@ -19,6 +19,7 @@ return function(K)
   local M = {}
 
   local QUANTUM = 1000          -- instructions per quantum
+  M.QUANTUM = QUANTUM           -- exposed for /sys/kernel/quantum
   local ready = {}              -- ready queue (list of processes)
   local waiting = {}            -- waiting processes: waiting[reason][key] = proc
   local current = nil           -- currently running process
@@ -108,7 +109,7 @@ return function(K)
     if K.selfcheck.preempt then
       debug.sethook(proc.co, function()
         coroutine.yield({ "preempt" })
-      end, "", QUANTUM)
+      end, "", M.QUANTUM)
     end
 
     local ok, req = coroutine.resume(proc.co, proc.pending_result)
@@ -188,6 +189,8 @@ return function(K)
         end
         -- network timers (ARP expiry, etc.) are handled first
         if K.net and K.net.timer_fired and K.net.timer_fired(ev[2]) then return end
+        -- socket recv timeouts (SO_RCVTIMEO)
+        if K.ipc and K.ipc.recv_timeout_fired and K.ipc.recv_timeout_fired(ev[2]) then return end
         M.wake("timer", ev[2], true)
       elseif name == "modem_message" then
         if K.net and K.net.on_modem_message then
@@ -209,8 +212,9 @@ return function(K)
         -- pointer events: feed /dev/input raw-event readers only
         M.wake("input", "input", ev)
       elseif name == "peripheral" then
-        -- device hotplug: wake devctl readers
-        M.wake("devctl", "devctl", ev)
+        -- device hotplug: wake devctl readers with a structured event
+        local kind = ev[3] == "detach" and "detach" or "attach"
+        M.wake("devctl", "devctl", kind .. " " .. tostring(ev[2]))
       elseif name == "http_success" then
         if K.ipc and K.ipc.http_event then K.ipc.http_event("success", ev[2]) end
       elseif name == "http_failure" then
