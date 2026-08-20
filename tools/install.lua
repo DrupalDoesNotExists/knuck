@@ -31,14 +31,6 @@ local FILES = {
   { "src/kernel/auth.lua", "kernel/auth.lua" },
   { "src/kernel/tty.lua", "kernel/tty.lua" },
   { "src/kernel/drivers/term.lua", "kernel/drivers/term.lua" },
-  { "src/userspace/init.lua", "sbin/init.lua" },
-  { "src/userspace/hello.lua", "sbin/hello.lua" },
-  { "src/userspace/ipc_child.lua", "sbin/ipc_child.lua" },
-  { "src/userspace/sh.lua", "sbin/sh.lua" },
-  { "src/userspace/useradd.lua", "sbin/useradd.lua" },
-  { "src/userspace/groupadd.lua", "sbin/groupadd.lua" },
-  { "src/userspace/deluser.lua", "sbin/deluser.lua" },
-  { "tests/vfs_ipc_test.lua", "tests/vfs_ipc_test.lua" },
 }
 
 local function ensure_dir(path)
@@ -83,8 +75,8 @@ end
 print("")
 print("Installed " .. #FILES .. " files, " .. total .. " bytes.")
 
--- Install man pages (docs/man/man2/*.2 -> usr/share/man/man2/*.2)
-local MAN_SRC = "docs/man/man2"
+-- Install man pages (share/man/man2/*.2 -> usr/share/man/man2/*.2)
+local MAN_SRC = "share/man/man2"
 local MAN_DST = DEST .. "/usr/share/man/man2"
 local MAN_NAMES = {
   "accept","alarm","bind","chdir","chgrp","chmod","chown","chroot","clear",
@@ -135,35 +127,4 @@ else
   end
 end
 
--- Configure /boot/init.rc so init starts the debug shell.
--- init.rc format: "service <name> <path> <args...>"
-local INITRC = "/boot/init.rc"
-local rc_line = "service shell " .. DEST .. "/sbin/sh.lua\n"
-local rc_existing = ""
-if fs.exists(INITRC) then
-  local h = fs.open(INITRC, "r")
-  if h then
-    rc_existing = h.readAll() or ""
-    h.close()
-  end
-end
-if rc_existing:find("service shell", 1, true) then
-  print("init.rc already has shell service")
-else
-  local h = fs.open(INITRC, "w")
-  if h then
-    h.write(rc_existing .. rc_line)
-    h.close()
-    print("init.rc configured: shell service added to " .. INITRC)
-  else
-    print("WARNING: could not write " .. INITRC .. " - add manually:")
-    print("  " .. rc_line)
-  end
-end
-
 print("")
-print("Run the kernel now:")
-print("  lua " .. DEST .. "/knuck.lua")
-print("")
-print("Debug shell (after boot):")
-print("  lua " .. DEST .. "/sbin/sh.lua")
