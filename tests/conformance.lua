@@ -774,6 +774,26 @@ syscall_probe("sys.socket", function()
   close(s)
   return "ok"
 end)
+syscall_probe("sys.dup", function()
+  local r, w = pipe()
+  if not r then return "pipe failed" end
+  local d = dup(w)
+  if not d then close(r) close(w) return "dup failed" end
+  write(d, "hi")
+  local got = read(r, 2)
+  close(r) close(w) close(d)
+  return got
+end)
+syscall_probe("sys.dup2", function()
+  local r, w = pipe()
+  if not r then return "pipe failed" end
+  local ok = dup2(w, 7)
+  if not ok then close(r) close(w) return "dup2 failed" end
+  write(7, "yo")
+  local got = read(r, 2)
+  close(r) close(w) close(7)
+  return got
+end)
 syscall_probe("sys.select", function() return select({}, {}, 0) end)
 syscall_probe("sys.poll", function() return poll({}, 0) end)
 

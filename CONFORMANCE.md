@@ -122,6 +122,8 @@
 | 59 | send(fd, data, flags?) → n | §5.3 | DONE | syscall.lua send; ipc.lua socket_send | flags param accepted and passed |
 | 60 | recv(fd, len?, flags?) → data\|nil | §5.3 | DONE | syscall.lua recv; ipc.lua socket_recv | flags: MSG_DONTWAIT=1, MSG_PEEK=2 honored |
 | 61 | close(fd) | §5.3 | DONE | syscall.lua:319-325 | |
+| 61a | dup(fd) → newfd — duplicate to lowest free slot | §5.3 | DONE | syscall.lua dup | Shares open file description (offset/socket/pipe end) |
+| 61b | dup2(fd, newfd) → newfd — duplicate to specific slot | §5.3 | DONE | syscall.lua dup2 | Closes newfd first if open; dup2(fd,fd) no-op |
 | 62 | shutdown(fd, "read"\|"write"\|"both") | §5.3 | DONE | syscall.lua shutdown; ipc.lua socket_shutdown | Honors read/write/both (pipe ends for unix, FIN for TCP) |
 | 63 | getsockname(fd) → addr | §5.3 | DONE | syscall.lua:577-581 | Returns fd.sock.path |
 | 64 | getpeername(fd) → addr | §5.3 | DONE | syscall.lua:584-588 | Returns fd.sock.peer |
@@ -293,12 +295,12 @@
 
 | Status | Count |
 |--------|-------|
-| **DONE** | 154 |
+| **DONE** | 156 |
 | **PARTIAL** | 0 |
 | **MISSING** | 0 |
 | **CUT** | 2 |
 | **N/A** | 7 |
-| **Total requirements** | **163** |
+| **Total requirements** | **165** |
 
 ### Every MISSING item (backlog)
 

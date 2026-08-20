@@ -397,6 +397,31 @@ return function(K)
     return true
   end)
 
+  -- dup(fdnum) — duplicate an fd to the lowest free number (shares the
+  -- underlying open file description: same offset, same socket).
+  M.register("dup", function(proc, fdnum)
+    local fd = proc.fds[fdnum]
+    if not fd then return nil, "bad fd" end
+    local n = alloc_fd(proc, fd)
+    if not n then return nil, "too many open files" end
+    return n
+  end)
+
+  -- dup2(fdnum, newfd) — duplicate fd to a specific number, closing newfd
+  -- first if it is open. Returns newfd on success.
+  M.register("dup2", function(proc, fdnum, newfd)
+    local fd = proc.fds[fdnum]
+    if not fd then return nil, "bad fd" end
+    if newfd == fdnum then return newfd end
+    local old = proc.fds[newfd]
+    if old then
+      K.vfs.close(old)
+      proc.fds[newfd] = nil
+    end
+    proc.fds[newfd] = fd
+    return newfd
+  end)
+
   M.register("read", function(proc, fdnum, n)
     local fd = proc.fds[fdnum]
     if not fd then return nil, "bad fd" end

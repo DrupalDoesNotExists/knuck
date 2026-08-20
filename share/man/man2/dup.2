@@ -1,0 +1,27 @@
+NAME
+  dup, dup2 - KNUCK syscalls
+
+SYNOPSIS
+  dup(fd)
+  dup2(fd, newfd)
+
+DESCRIPTION
+  dup duplicates an open file descriptor (file, pipe, socket, device) to the
+  lowest free descriptor number. dup2 duplicates it to a specific descriptor
+  number, closing newfd first if it is open. The duplicate shares the same
+  underlying open file description: same offset, same socket, same pipe end.
+
+  dup2(fd, fd) is a no-op returning fd.
+
+RETURN VALUES
+  dup: new descriptor number, or nil,err
+  dup2: newfd on success, or nil,err
+
+ERRORS
+  bad fd            fd is not open
+  too many open files  no free descriptor slot (dup)
+
+SEE ALSO
+  open close pipe socket
+
+KNUCK(2) manual page. Part of the KNUCK kernel distribution.
