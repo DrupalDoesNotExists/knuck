@@ -88,6 +88,13 @@ return function(K)
     return K.vfs.write(proc, fd, line)
   end)
 
+  -- clear: clear the terminal screen (userspace has no term access)
+  M.register("clear", function(proc)
+    K.env.term.clear()
+    K.env.term.setCursorPos(1, 1)
+    return true
+  end)
+
   -- spawn a child process
   M.register("spawn", function(proc, path, ...)
     local args = { ... }

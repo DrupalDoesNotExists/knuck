@@ -189,6 +189,7 @@ if not console then
   exit(1)
 end
 
+clear()
 print("KNUCK sh - type 'help' for builtins, 'exit' to quit")
 while true do
   print("sh# ")
