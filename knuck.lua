@@ -46,8 +46,56 @@ K.bit = {
 -- Kernel log (writes to stderr/console)
 function K.log(msg)
   term.setTextColor(colors.yellow)
-  term.write("[k] " .. tostring(msg) .. "\n")
+  K.term_write("[k] " .. tostring(msg) .. "\n")
   term.setTextColor(colors.white)
+end
+
+-- Terminal writer with explicit newline/wrap handling.
+-- CC's term.write does not reliably wrap or advance lines across versions,
+-- so the kernel manages cursor movement itself: split on \n, write in
+-- screen-width chunks, scroll at the bottom edge.
+function K.term_write(s)
+  local t = term
+  local text = tostring(s or "")
+  if not t or not t.getSize or not t.getCursorPos or not t.setCursorPos then
+    -- fallback (host stub / minimal env): plain write
+    if t and t.write then t.write(text) end
+    return
+  end
+  local w, h = t.getSize()
+  if not w or w < 1 or not h or h < 1 then
+    if t.write then t.write(text) end
+    return
+  end
+  if text:sub(-1) ~= "\n" then text = text .. "\n" end
+  for line in text:gmatch("(.-)\n") do
+    local cx, cy = t.getCursorPos()
+    local col = cx or 1
+    local i = 1
+    while i <= #line do
+      local avail = w - col + 1
+      if avail < 1 then avail = 1 end
+      local chunk = line:sub(i, i + avail - 1)
+      t.write(chunk)
+      i = i + #chunk
+      col = col + #chunk
+      if col > w then
+        cy = cy + 1
+        if cy > h then
+          t.scroll(1)
+          cy = h
+        end
+        t.setCursorPos(1, cy)
+        col = 1
+      end
+    end
+    cy = cy + 1
+    if cy > h then
+      t.scroll(1)
+      cy = h
+    end
+    t.setCursorPos(1, cy)
+  end
 end
 
 -- 1. Loader

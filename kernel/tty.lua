@@ -33,7 +33,7 @@ return function(K)
     local s = tostring(data or "")
     t.buffer = t.buffer .. s
     if id == active then
-      term.write(s)
+      K.term_write(s)
     end
     return #s
   end
@@ -51,7 +51,7 @@ return function(K)
     active = id
     term.clear()
     term.setCursorPos(1, 1)
-    term.write(ttys[id].buffer)
+    K.term_write(ttys[id].buffer)
     return true
   end
 
@@ -74,7 +74,7 @@ return function(K)
         local t = ttys[id]
         local s = tostring(data or "")
         t.buffer = t.buffer .. s
-        if id == active then term.write(s) end
+        if id == active then K.term_write(s) end
         return #s
       end,
       read = function(n)
