@@ -132,10 +132,17 @@ return function(K)
   function M.find_mount(path)
     local best, best_len = nil, -1
     for mp, m in pairs(mounts) do
-      if path == mp or path:sub(1, #mp + 1) == mp .. "/" then
-        if #mp > best_len then
-          best, best_len = m, #mp
-        end
+      local under
+      if path == mp then
+        under = true
+      elseif mp == "/" then
+        -- root mount: every absolute path is under it
+        under = path:sub(1, 1) == "/"
+      else
+        under = path:sub(1, #mp + 1) == mp .. "/"
+      end
+      if under and #mp > best_len then
+        best, best_len = m, #mp
       end
     end
     return best

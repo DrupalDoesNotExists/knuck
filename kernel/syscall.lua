@@ -92,14 +92,12 @@ return function(K)
   M.register("clear", function(proc)
     K.env.term.clear()
     K.env.term.setCursorPos(1, 1)
-    if K.log then K.log("shell: clear") end
     return true
   end)
 
   -- diag: report terminal/tty state so the shell can self-diagnose rendering.
   -- Returns { tty, active, cx, cy, w, h, out } where out is the type of fd 1.
   M.register("diag", function(proc)
-    if K.log then K.log("diag: entered") end
     local cx, cy = 0, 0
     local w, h = 0, 0
     local t = K.env.term

@@ -197,17 +197,7 @@ if not console then
 end
 
 clear()
-print("KNUCK sh v2")
-local okd, d = pcall(diag)
-if okd and type(d) == "table" then
-  print("DIAG t=" .. tostring(d.tty) .. " a=" .. tostring(d.active)
-    .. " c=" .. tostring(d.cx) .. "," .. tostring(d.cy)
-    .. " s=" .. tostring(d.w) .. "x" .. tostring(d.h)
-    .. " o=" .. tostring(d.out))
-else
-  print("DIAG ERR " .. tostring(d))
-end
-print("READY")  -- diag: any output after clear() must render below banner
+print("KNUCK sh v2 - type 'help' for builtins, 'exit' to quit")
 while true do
   write(1, "sh# ")
   local line = readline(console, true)
