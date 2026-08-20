@@ -41,6 +41,7 @@ K.proc = K.loader.load("/knuck/kernel/proc.lua", K)
 K.fs = K.loader.load("/knuck/kernel/fs.lua", K)
 K.vfs = K.loader.load("/knuck/kernel/vfs.lua", K)
 K.ipc = K.loader.load("/knuck/kernel/ipc.lua", K)
+K.net = K.loader.load("/knuck/kernel/net.lua", K)
 
 -- 4. Init modules (dependency order)
 K.syscall.init(K)
@@ -50,6 +51,9 @@ K.sched.init(K)
 
 -- 5. Mount VFS
 K.vfs.mount_root()
+
+-- 5b. Init network (gracefully disables if no modem)
+K.net.init()
 
 -- 6. Boot banner
 term.clear()

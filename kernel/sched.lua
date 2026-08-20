@@ -145,7 +145,13 @@ return function(K)
     dispatch = function(ev)
       local name = ev[1]
       if name == "timer" then
+        -- network timers (ARP expiry, etc.) are handled first
+        if K.net and K.net.timer_fired and K.net.timer_fired(ev[2]) then return end
         M.wake("timer", ev[2], true)
+      elseif name == "modem_message" then
+        if K.net and K.net.on_modem_message then
+          K.net.on_modem_message(ev[2], ev[3], ev[4], ev[5], ev[6])
+        end
       elseif name == "char" or name == "key" or name == "key_up" or name == "mouse_click" then
         -- console input: wake processes reading /dev/console or /dev/input
         M.wake("input", "console", ev)

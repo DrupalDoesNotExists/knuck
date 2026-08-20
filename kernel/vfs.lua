@@ -164,8 +164,15 @@ return function(K)
   end
 
   -- /sys: kernel info
-  local function sys_list()
-    return { "kernel", "net", "modules" }
+  local function sys_list(path)
+    if path == "/sys" then
+      return { "kernel", "net", "modules" }
+    elseif path == "/sys/kernel" then
+      return { "version", "scheduler" }
+    elseif path == "/sys/net" then
+      return { "ip", "gateway", "netmask", "arp", "routes", "channel" }
+    end
+    return {}
   end
 
   local function sys_read(path)
@@ -180,13 +187,75 @@ return function(K)
       for name in pairs(K.modules) do parts[#parts + 1] = name end
       table.sort(parts)
       return table.concat(parts, "\n") .. "\n"
+    elseif rest == "net/ip" then
+      return K.net.ip_to_str(K.net.ip) .. "\n"
+    elseif rest == "net/gateway" then
+      return K.net.ip_to_str(K.net.gateway) .. "\n"
+    elseif rest == "net/netmask" then
+      return K.net.ip_to_str(K.net.netmask) .. "\n"
+    elseif rest == "net/channel" then
+      return tostring(K.net.channel) .. "\n"
+    elseif rest == "net/arp" then
+      local parts = {}
+      for ip, e in pairs(K.net.arp_cache) do
+        parts[#parts + 1] = ip .. " = " .. K.net.mac_to_str(e.mac)
+      end
+      table.sort(parts)
+      return table.concat(parts, "\n") .. "\n"
+    elseif rest == "net/routes" then
+      return ""
     end
     return nil
+  end
+
+  -- /sys writes: root-only (uid 0). Currently only /sys/net/* is writable.
+  local function sys_write(path, data)
+    local rest = path:match("^/sys/(.+)$")
+    if not rest then return nil, "read-only" end
+    local value = data:gsub("%s+$", "")
+    if rest == "net/ip" then
+      local ip = K.net.str_to_ip(value)
+      if not ip then return nil, "invalid ip" end
+      K.net.ip = ip
+      return #data
+    elseif rest == "net/gateway" then
+      local gw = K.net.str_to_ip(value)
+      if not gw then return nil, "invalid gateway" end
+      K.net.gateway = gw
+      return #data
+    elseif rest == "net/netmask" then
+      local nm = K.net.str_to_ip(value)
+      if not nm then return nil, "invalid netmask" end
+      K.net.netmask = nm
+      return #data
+    elseif rest == "net/channel" then
+      local ch = tonumber(value)
+      if not ch then return nil, "invalid channel" end
+      K.net.channel = ch
+      if K.net.enabled then
+        K.net.modem.closeAll()
+        K.net.modem.open(ch)
+      end
+      return #data
+    elseif rest == "net/arp" then
+      -- static entry: "ip = mac"
+      local ip, mac = value:match("^(%d+%.%d+%.%d+%.%d+)%s*=%s*(%x+:%x+:%x+:%x+:%x+:%x+)$")
+      if not ip then return nil, "invalid arp entry" end
+      local ip4 = K.net.str_to_ip(ip)
+      local mac6 = K.net.str_to_mac(mac)
+      if not ip4 or not mac6 then return nil, "invalid arp entry" end
+      K.net.arp_cache[ip] = { mac = mac6, ttl = 0, static = true }
+      return #data
+    end
+    return nil, "read-only"
   end
 
   -- /dev: device nodes
   local function dev_list()
     local out = { "console", "null", "zero", "urandom", "input", "devctl", "periph" }
+    for name in pairs(devices) do
+      if name ~= "console" then out[#out + 1] = name end
+    end
     return out
   end
 
@@ -209,7 +278,8 @@ return function(K)
         return { type = "device", mode = 0x1B6, uid = 0, gid = 0, nlink = 1, device = name }
       end
       if devices[name] then
-        return { type = "device", mode = 0x1B6, uid = 0, gid = 0, nlink = 1, device = name }
+        local drv = devices[name]
+        return { type = "device", mode = drv.mode or 0x1B6, uid = 0, gid = 0, nlink = 1, device = name }
       end
       return nil
     elseif m.fstype == "proc" then
@@ -227,6 +297,9 @@ return function(K)
       return nil
     elseif m.fstype == "sys" then
       if path == "/sys" then
+        return { type = "dir", mode = 0x1ED, uid = 0, gid = 0, nlink = 1 }
+      end
+      if path == "/sys/net" or path == "/sys/kernel" then
         return { type = "dir", mode = 0x1ED, uid = 0, gid = 0, nlink = 1 }
       end
       if sys_read(path) then
@@ -266,7 +339,7 @@ return function(K)
     if not ino or ino.type ~= "dir" then return nil, "not a directory" end
     if not fs_mod.check_access(proc, ino, "r") then return nil, "permission denied" end
     if m.fstype == "proc" then return proc_list() end
-    if m.fstype == "sys" then return sys_list() end
+    if m.fstype == "sys" then return sys_list(p) end
     if m.fstype == "dev" then return dev_list() end
     return fs_mod.list(p)
   end
@@ -316,7 +389,7 @@ return function(K)
 
     if m.fstype == "proc" or m.fstype == "sys" then
       local data = (m.fstype == "proc") and proc_read(p) or sys_read(p)
-      return { type = "memfile", data = data or "", pos = 0 }
+      return { type = "memfile", data = data or "", pos = 0, path = p }
     end
 
     -- real file
@@ -361,6 +434,10 @@ return function(K)
       fd.handle.write(data)
       return #data
     elseif fd.type == "memfile" then
+      if fd.path and fd.path:match("^/sys/") then
+        if proc.uid ~= 0 then return nil, "permission denied" end
+        return sys_write(fd.path, data)
+      end
       return #data
     elseif fd.type == "device" then
       if fd.driver.write then return fd.driver.write(data) end
