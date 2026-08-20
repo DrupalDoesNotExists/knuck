@@ -1,0 +1,16 @@
+NAME
+  accept - KNUCK syscall
+
+SYNOPSIS
+  accept(fd) -> newfd
+
+DESCRIPTION
+  Accept a connection on a listening socket. Blocks until a connection arrives.
+
+RETURN VALUES
+  newfd on success, nil,err on failure
+
+SEE ALSO
+  listen socket bind
+
+KNUCK(2) manual page. Part of the KNUCK kernel distribution.

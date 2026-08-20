@@ -1,0 +1,16 @@
+NAME
+  chmod - KNUCK syscall
+
+SYNOPSIS
+  chmod(path, mode)
+
+DESCRIPTION
+  Change file permissions. mode is octal rwxrwxrwx (e.g. 0x1A4 = 0644). Owner or root.
+
+RETURN VALUES
+  true or nil,err
+
+SEE ALSO
+  stat chown
+
+KNUCK(2) manual page. Part of the KNUCK kernel distribution.

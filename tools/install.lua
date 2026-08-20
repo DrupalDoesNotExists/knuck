@@ -82,6 +82,31 @@ end
 
 print("")
 print("Installed " .. #FILES .. " files, " .. total .. " bytes.")
+
+-- Install man pages (docs/man/man2/*.2 -> usr/share/man/man2/*.2)
+local MAN_SRC = "docs/man/man2"
+local MAN_DST = DEST .. "/usr/share/man/man2"
+local MAN_NAMES = {
+  "accept","alarm","bind","chdir","chgrp","chmod","chown","chroot","clear",
+  "clock","clock_gettime","close","connect","diag","exec","exit","fstat",
+  "getcwd","getegid","geteuid","getgid","getgrgid","getgrnam","getpeername",
+  "getpgrp","getpid","getppid","getpriority","getpwnam","getpwuid",
+  "getsockname","getsockopt","getuid","halt","insmod","ioctl","kill","link",
+  "listen","login","lseek","mkdir","mkfifo","mount","open","pipe","poll",
+  "print","read","readdir","readlink","reboot","recv","recvfrom","rename",
+  "rmdir","rmmod","sched_setscheduler","sched_yield","select","send","sendto",
+  "setgid","setpgid","setpriority","setsockopt","setuid","shutdown","signal",
+  "sigprocmask","sleep","socket","spawn","stat","symlink","time","umask",
+  "umount","unlink","waitpid","write",
+}
+local man_total = 0
+for _, name in ipairs(MAN_NAMES) do
+  local url = BASE .. "/" .. MAN_SRC .. "/" .. name .. ".2"
+  local dest = MAN_DST .. "/" .. name .. ".2"
+  local n = download(url, dest)
+  man_total = man_total + n
+end
+print("Installed " .. #MAN_NAMES .. " man pages, " .. man_total .. " bytes.")
 print("")
 
 -- Configure autostart so the kernel boots on CC startup.

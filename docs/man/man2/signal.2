@@ -1,0 +1,16 @@
+NAME
+  signal - KNUCK syscall
+
+SYNOPSIS
+  signal(sig, handler|nil|'ignore')
+
+DESCRIPTION
+  Install a signal handler. SIGKILL/SIGSTOP cannot be changed.
+
+RETURN VALUES
+  true or nil,err
+
+SEE ALSO
+  kill sigprocmask
+
+KNUCK(2) manual page. Part of the KNUCK kernel distribution.

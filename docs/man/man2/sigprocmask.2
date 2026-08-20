@@ -1,0 +1,16 @@
+NAME
+  sigprocmask - KNUCK syscall
+
+SYNOPSIS
+  sigprocmask(how, set?)
+
+DESCRIPTION
+  Block/unblock signals. how: 'block'|'unblock'|'set'. KILL/STOP never blocked.
+
+RETURN VALUES
+  true or nil,err
+
+SEE ALSO
+  signal kill
+
+KNUCK(2) manual page. Part of the KNUCK kernel distribution.

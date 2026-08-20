@@ -66,9 +66,17 @@ local function libfn(lib, fn)
   return type(lib) == "table" and type(lib[fn]) == "function"
 end
 
+-- Detect KNUCK kernel environment (syscall wrappers present).
+-- Under KNUCK there is no term/io/os — page via print instead.
+local knuck = type(getpid) == "function"
+if knuck then
+  page = function(text) print(text) end
+end
+
 -- ============================================================
 -- SECTION 1: LUA RUNTIME
 -- ============================================================
+if not knuck then
 section("1. LUA RUNTIME")
 
 -- 1.1 Version
@@ -669,16 +677,134 @@ end)
 -- 6.3 clock monotonicity
 probe("timing.clock", function() return os.clock() end)
 
+end -- not knuck (sections 1-6 are CraftOS platform probes)
+
+-- ============================================================
+-- SECTION 7: KNUCK SYSCALLS (kernel syscall matrix)
+-- ============================================================
+section("7. KNUCK SYSCALLS")
+
+local function syscall_probe(name, fn)
+  if not knuck then
+    report(name, "SKIP", "not running under KNUCK")
+    return
+  end
+  probe(name, fn)
+end
+
+if not knuck then
+  page("Not running under KNUCK kernel — syscall matrix SKIPPED")
+end
+
+-- 7.1 process identity
+syscall_probe("sys.getpid", function() return getpid() end)
+syscall_probe("sys.getppid", function() return getppid() end)
+syscall_probe("sys.getuid", function() return getuid() end)
+syscall_probe("sys.geteuid", function() return geteuid() end)
+syscall_probe("sys.getgid", function() return getgid() end)
+syscall_probe("sys.getegid", function() return getegid() end)
+syscall_probe("sys.getpgrp", function() return getpgrp() end)
+syscall_probe("sys.getcwd", function() return getcwd() end)
+
+-- 7.2 process control
+syscall_probe("sys.sched_yield", function() sched_yield() return "ok" end)
+syscall_probe("sys.sleep", function() sleep(0.01) return "ok" end)
+syscall_probe("sys.alarm", function() alarm(0.01) return "ok" end)
+syscall_probe("sys.getpriority", function() return getpriority() end)
+syscall_probe("sys.setpriority", function() setpriority(nil, 0) return "ok" end)
+syscall_probe("sys.sched_setscheduler", function() sched_setscheduler(nil, "other") return "ok" end)
+syscall_probe("sys.clock_gettime", function()
+  local s, ns = clock_gettime(0)
+  return tostring(s) .. "." .. tostring(ns)
+end)
+syscall_probe("sys.time", function() return time() end)
+syscall_probe("sys.clock", function() return clock() end)
+
+-- 7.3 signals
+syscall_probe("sys.signal", function() signal(10, function() end) return "ok" end)
+syscall_probe("sys.sigprocmask", function() sigprocmask("block", {}) return "ok" end)
+syscall_probe("sys.kill", function() return kill(getpid(), 0) end)
+
+-- 7.4 filesystem
+syscall_probe("sys.stat", function() return stat("/") end)
+syscall_probe("sys.readdir", function() return readdir("/") end)
+syscall_probe("sys.open_write_close", function()
+  local f = open("/tmp/conftest", "w")
+  if not f then return "open failed" end
+  write(f, "x")
+  close(f)
+  unlink("/tmp/conftest")
+  return "ok"
+end)
+syscall_probe("sys.mkdir_rmdir", function()
+  mkdir("/tmp/conftestdir")
+  rmdir("/tmp/conftestdir")
+  return "ok"
+end)
+syscall_probe("sys.chdir", function()
+  local old = getcwd()
+  chdir("/")
+  chdir(old)
+  return "ok"
+end)
+syscall_probe("sys.umask", function() umask(0) return "ok" end)
+syscall_probe("sys.symlink_readlink", function()
+  local f = open("/tmp/conftest", "w")
+  if f then write(f, "x") close(f) end
+  symlink("/tmp/conftest", "/tmp/conftestlink")
+  local t = readlink("/tmp/conftestlink")
+  unlink("/tmp/conftestlink")
+  unlink("/tmp/conftest")
+  return t
+end)
+
+-- 7.5 pipes / sockets
+syscall_probe("sys.pipe", function()
+  local r, w = pipe()
+  if not r then return "pipe failed" end
+  write(w, "hi")
+  local d = read(r, 2)
+  close(r)
+  close(w)
+  return d
+end)
+syscall_probe("sys.socket", function()
+  local s = socket("unix", "stream", 0)
+  if not s then return "socket failed" end
+  close(s)
+  return "ok"
+end)
+syscall_probe("sys.select", function() return select({}, {}, 0) end)
+syscall_probe("sys.poll", function() return poll({}, 0) end)
+
+-- 7.6 modules / power (root-only; report presence)
+syscall_probe("sys.insmod", function()
+  if getuid() ~= 0 then return "SKIP: not root" end
+  return "present"
+end)
+syscall_probe("sys.rmmod", function()
+  if getuid() ~= 0 then return "SKIP: not root" end
+  return "present"
+end)
+syscall_probe("sys.reboot", function()
+  if getuid() ~= 0 then return "SKIP: not root" end
+  return "present (not invoked)"
+end)
+syscall_probe("sys.halt", function()
+  if getuid() ~= 0 then return "SKIP: not root" end
+  return "present (not invoked)"
+end)
+
 -- ============================================================
 -- SUMMARY
 -- ============================================================
 section("SUMMARY")
-local counts = { OK = 0, LIMITED = 0, CUT = 0, ERROR = 0 }
+local counts = { OK = 0, LIMITED = 0, CUT = 0, ERROR = 0, SKIP = 0 }
 for _, r in ipairs(results) do
   counts[r.status] = (counts[r.status] or 0) + 1
 end
-page(string.format("OK: %d   LIMITED: %d   CUT: %d   ERROR: %d",
-  counts.OK or 0, counts.LIMITED or 0, counts.CUT or 0, counts.ERROR or 0))
+page(string.format("OK: %d   LIMITED: %d   CUT: %d   ERROR: %d   SKIP: %d",
+  counts.OK or 0, counts.LIMITED or 0, counts.CUT or 0, counts.ERROR or 0, counts.SKIP or 0))
 
 page("--- Details ---")
 for _, r in ipairs(results) do

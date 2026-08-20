@@ -1,0 +1,16 @@
+NAME
+  kill - KNUCK syscall
+
+SYNOPSIS
+  kill(pid, sig)
+
+DESCRIPTION
+  Send a signal. pid>0 specific, 0 own group, -1 all except self (root). sig 0 = existence check.
+
+RETURN VALUES
+  true or nil,err
+
+SEE ALSO
+  signal sigprocmask
+
+KNUCK(2) manual page. Part of the KNUCK kernel distribution.

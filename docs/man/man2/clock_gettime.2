@@ -1,0 +1,16 @@
+NAME
+  clock_gettime - KNUCK syscall
+
+SYNOPSIS
+  clock_gettime(clock) -> secs, nsecs
+
+DESCRIPTION
+  Return time for a clock: CLOCK_REALTIME=0 (epoch), CLOCK_MONOTONIC=1 (since boot).
+
+RETURN VALUES
+  secs, nsecs
+
+SEE ALSO
+  time clock
+
+KNUCK(2) manual page. Part of the KNUCK kernel distribution.

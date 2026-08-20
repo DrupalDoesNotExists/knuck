@@ -1,0 +1,16 @@
+NAME
+  setsockopt - KNUCK syscall
+
+SYNOPSIS
+  setsockopt(fd, level, opt, val)
+
+DESCRIPTION
+  Set a socket option. SOL_SOCKET=1: SO_REUSEADDR=2, SO_BROADCAST=6, SO_RCVTIMEO=20. HTTP level=2: METHOD=1, HEADERS=2, BODY=3.
+
+RETURN VALUES
+  true or nil,err
+
+SEE ALSO
+  getsockopt
+
+KNUCK(2) manual page. Part of the KNUCK kernel distribution.

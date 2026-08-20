@@ -1,0 +1,16 @@
+NAME
+  getsockopt - KNUCK syscall
+
+SYNOPSIS
+  getsockopt(fd, level, opt) -> val
+
+DESCRIPTION
+  Get a socket option. SOL_SOCKET=1: SO_REUSEADDR=2, SO_BROADCAST=6, SO_RCVTIMEO=20.
+
+RETURN VALUES
+  value or nil
+
+SEE ALSO
+  setsockopt
+
+KNUCK(2) manual page. Part of the KNUCK kernel distribution.

@@ -176,6 +176,12 @@ K.sched.init(K)
 -- 5. Mount VFS
 K.vfs.mount_root()
 
+-- 5a. Mount present disk drives at /mnt/disk0..N
+local ndrives = K.vfs.mount_drives()
+if ndrives > 0 then
+  print("  mounted " .. ndrives .. " disk drive(s)")
+end
+
 -- 5a. Load /boot/knuck.conf (extra modules + init path)
 local init_path = "/knuck/sbin/init.lua"
 local ok_conf, conf = pcall(K.fs.read_all, "/boot/knuck.conf")

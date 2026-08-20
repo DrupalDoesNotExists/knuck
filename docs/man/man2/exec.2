@@ -1,0 +1,16 @@
+NAME
+  exec - KNUCK syscall
+
+SYNOPSIS
+  exec(path, ...)
+
+DESCRIPTION
+  Replace the current process image with another program. Applies setuid/setgid bits, resets signals.
+
+RETURN VALUES
+  nil,err on failure (never returns on success)
+
+SEE ALSO
+  spawn exit
+
+KNUCK(2) manual page. Part of the KNUCK kernel distribution.

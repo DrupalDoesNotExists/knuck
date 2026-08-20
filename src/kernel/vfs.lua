@@ -132,6 +132,56 @@ return function(K)
     wipe("/tmp")
   end
 
+  -- Mount all present disk drives at /mnt/disk0..N (fstype floppy/hdd).
+  -- Returns the number of drives mounted.
+  function M.mount_drives()
+    local idx = 0
+    local names = {}
+    if peripheral and peripheral.getNames then
+      names = peripheral.getNames()
+    end
+    for _, side in ipairs(names) do
+      local ok, ptype = pcall(peripheral.getType, side)
+      if ok and ptype == "drive" then
+        M.drive_side(side)
+        idx = idx + 1
+      end
+    end
+    return idx
+  end
+
+  -- Mount/unmount a single drive by peripheral side (hotplug).
+  -- detach=true unmounts; otherwise mounts the drive at the next /mnt/diskN.
+  local drive_sides = {}   -- side -> mountpoint
+  local drive_next = 0
+  function M.drive_side(side, detach)
+    if detach then
+      local mp = drive_sides[side]
+      if mp then
+        M.unmount_drive(mp)
+        drive_sides[side] = nil
+      end
+      return
+    end
+    local ok, ptype = pcall(peripheral.getType, side)
+    if not ok or ptype ~= "drive" then return end
+    local ok2, mpath = pcall(disk.getMountPath, side)
+    if not ok2 or not mpath then return end
+    local mp = "/mnt/disk" .. drive_next
+    drive_next = drive_next + 1
+    mounts[mp] = { fstype = "floppy", real_root = mpath }
+    fs_mod.set_drive_mount(mp, mpath)
+    drive_sides[side] = mp
+  end
+
+  -- Unmount a drive by its /mnt/diskN mountpoint (on detach).
+  function M.unmount_drive(mp)
+    if not mounts[mp] then return false end
+    mounts[mp] = nil
+    fs_mod.clear_drive_mount(mp)
+    return true
+  end
+
   -- Register a device node driver
   function M.register_device(name, driver)
     devices[name] = driver

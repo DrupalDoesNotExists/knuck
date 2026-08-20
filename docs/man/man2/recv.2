@@ -1,0 +1,16 @@
+NAME
+  recv - KNUCK syscall
+
+SYNOPSIS
+  recv(fd, len?, flags?) -> data
+
+DESCRIPTION
+  Receive from a socket. flags: MSG_DONTWAIT=1, MSG_PEEK=2.
+
+RETURN VALUES
+  string or nil,err
+
+SEE ALSO
+  send recvfrom
+
+KNUCK(2) manual page. Part of the KNUCK kernel distribution.

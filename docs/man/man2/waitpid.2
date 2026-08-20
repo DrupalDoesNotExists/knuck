@@ -1,0 +1,16 @@
+NAME
+  waitpid - KNUCK syscall
+
+SYNOPSIS
+  waitpid(pid, opt?) -> pid, status, code
+
+DESCRIPTION
+  Wait for a child. opt='nohang' polls. pid=-1 waits for any child.
+
+RETURN VALUES
+  pid, status, code or nil
+
+SEE ALSO
+  spawn exit
+
+KNUCK(2) manual page. Part of the KNUCK kernel distribution.

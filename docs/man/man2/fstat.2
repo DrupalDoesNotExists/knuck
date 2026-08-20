@@ -1,0 +1,16 @@
+NAME
+  fstat - KNUCK syscall
+
+SYNOPSIS
+  fstat(fd) -> info
+
+DESCRIPTION
+  Stat an open file descriptor. Returns {size, type, mode, uid, gid, nlink}.
+
+RETURN VALUES
+  table or nil,err
+
+SEE ALSO
+  stat open
+
+KNUCK(2) manual page. Part of the KNUCK kernel distribution.

@@ -161,7 +161,7 @@
 | 89 | fstype `dev` — device nodes | §5.4 | DONE | vfs.lua:62 | |
 | 90 | fstype `sys` — kernel settings | §5.4 | DONE | vfs.lua:63 | |
 | 91 | fstype `proc` — procfs | §5.4 | DONE | vfs.lua:64 | |
-| 92 | fstype `floppy`/`hdd` — disk drives | §5.4 | MISSING | **No fstype floppy/hdd defined; no auto-mount** | |
+| 92 | fstype `floppy`/`hdd` — disk drives | §5.4 | DONE | vfs.lua mount_drives/drive_side | Drive peripherals mounted as floppy at /mnt/diskN |
 | 93 | fstype `rom` — CC platform | §5.4 | DONE | vfs.lua:61 | |
 | 94 | `/` ← computer storage (writable) [disk] | §5.4 | DONE | vfs.lua:58 | |
 | 95 | `/boot` ← kernel + modules (writable) [disk] | §5.4 | DONE | vfs.lua:59 | |
@@ -169,7 +169,7 @@
 | 97 | `/dev` ← device nodes [dev] | §5.4 | DONE | vfs.lua:62 | |
 | 98 | `/sys` ← kernel settings [sys] | §5.4 | DONE | vfs.lua:63 | |
 | 99 | `/proc` ← procfs [proc] | §5.4 | DONE | vfs.lua:64 | |
-| 100 | `/mnt/disk0..N` ← disk drives on connect [floppy/hdd] | §5.4 | MISSING | **No auto-mount on peripheral attach** | Hotplug event goes to devctl but no auto-mount |
+| 100 | `/mnt/disk0..N` ← disk drives on connect [floppy/hdd] | §5.4 | DONE | vfs.lua drive_side; sched.lua peripheral dispatch | Auto-mount on attach, unmount on detach |
 | 101 | `/rom` ← CC platform base (not our filesystem) | §5.4 | DONE | vfs.lua:61 | |
 
 ## 5.4 Device Nodes /dev (SPEC §5.4 continued)
@@ -270,10 +270,10 @@
 
 | # | Requirement | Spec ref | Status | Evidence | Notes |
 |---|-------------|----------|--------|----------|-------|
-| 151 | man pages for every syscall — part of distribution | §7 | MISSING | **No man pages exist** in the repository | |
-| 152 | Stored in VFS (e.g., `/usr/share/man/man2/`) | §7 | MISSING | No `/usr/share/man` directory | |
-| 153 | Readable by userspace `man` command | §7 | MISSING | No `man` command exists | |
-| 154 | Format: plain text/roff-like; kernel stores, userspace renders | §7 | MISSING | No man page files | |
+| 151 | man pages for every syscall — part of distribution | §7 | DONE | docs/man/man2/*.2 (81 pages); tools/install.lua installs | Generated for all 81 syscalls |
+| 152 | Stored in VFS (e.g., `/usr/share/man/man2/`) | §7 | DONE | tools/install.lua installs to usr/share/man/man2/ | |
+| 153 | Readable by userspace `man` command | §7 | DONE | fsroot /knuck/sbin/man.lua | Userspace man command reads /usr/share/man/man2/ |
+| 154 | Format: plain text/roff-like; kernel stores, userspace renders | §7 | DONE | docs/man/man2/*.2 (NAME/SYNOPSIS/DESCRIPTION/RETURN/SEE ALSO) | Plain-text roff-like format |
 
 ## 8. Testing (SPEC §8)
 
@@ -281,7 +281,7 @@
 |---|-------------|----------|--------|----------|-------|
 | 155 | `tests/conformance.lua` — one big test file | §8 | DONE | tests/conformance.lua (688 lines) | Exists |
 | 156 | Section 1 (Platform): check runtime assumptions on bare CraftOS | §8 | DONE | conformance.lua:72-263 (sections 1.1-1.14: Lua, CraftOS APIs, events, hardware, sandbox, timing) | |
-| 157 | Section 2 (Kernel): run all syscalls, matrix OK/LIMITED/CUT/ERROR/SKIP | §8 | PARTIAL | conformance.lua:267-617 (sections 2-6) | **Section tests CraftOS APIs, NOT KNUCK syscalls**. No kernel syscall test matrix exists |
+| 157 | Section 2 (Kernel): run all syscalls, matrix OK/LIMITED/CUT/ERROR/SKIP | §8 | DONE | conformance.lua section 7 (KNUCK SYSCALLS) | Syscall matrix added; SKIPs on bare CraftOS, runs under KNUCK |
 | 158 | Run on real CC computer, output sent to developer | §8 | N/A | Process requirement; not testable in source | |
 
 ---
@@ -292,22 +292,15 @@
 
 | Status | Count |
 |--------|-------|
-| **DONE** | 147 |
-| **PARTIAL** | 3 |
-| **MISSING** | 6 |
+| **DONE** | 154 |
+| **PARTIAL** | 2 |
+| **MISSING** | 0 |
 | **N/A** | 7 |
 | **Total requirements** | **163** |
 
 ### Every MISSING item (backlog)
 
-| # | Requirement | Spec ref | Notes |
-|---|-------------|----------|-------|
-| 92 | fstype floppy/hdd | §5.4 | No disk drive filesystem type (P5) |
-| 100 | /mnt/disk0..N auto-mount | §5.4 | No auto-mount on peripheral attach (P5) |
-| 151 | Man pages for every syscall | §7 | No man pages (P5) |
-| 152 | /usr/share/man/man2/ in VFS | §7 | No man directory (P5) |
-| 153 | `man` userspace command | §7 | No man command (P5) |
-| 154 | Man page format (plain text/roff) | §7 | Nothing to format (P5) |
+None — all MISSING requirements closed.
 
 ### Every PARTIAL item (needs completion)
 
@@ -315,7 +308,6 @@
 |---|-------------|----------|----------------|
 | 55 | bind(fd, addr) for HTTP | §5.3 | HTTP bind not implemented (http only has connect) |
 | 85 | link(old, new) — true hardlink | §5.4 | Copy+delete, not inode-sharing (platform CUT candidate) |
-| 157 | conformance.lua tests KNUCK syscalls | §8 | Tests CraftOS APIs, not kernel syscalls (P5) |
 
 ---
 

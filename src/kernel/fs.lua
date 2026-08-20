@@ -20,6 +20,30 @@ return function(K)
   local inodes = {}             -- canonical path -> inode table
   local real_root = "/"         -- CraftOS fs root that VFS maps onto
 
+  -- Drive mounts: VFS prefix -> real CraftOS path (disk drives).
+  -- A drive peripheral's filesystem lives at a CC mount path (e.g. "disk");
+  -- we expose it under /mnt/diskN by translating paths before CC fs access.
+  local drive_mounts = {}       -- vfs_prefix -> real_path
+
+  function M.set_drive_mount(vfs_prefix, real_path)
+    drive_mounts[vfs_prefix] = real_path
+  end
+  function M.clear_drive_mount(vfs_prefix)
+    drive_mounts[vfs_prefix] = nil
+  end
+
+  -- Translate a VFS path to the real CraftOS path (honoring drive mounts).
+  local function real_path(path)
+    for prefix, real in pairs(drive_mounts) do
+      if path == prefix then
+        return real
+      elseif path:sub(1, #prefix + 1) == prefix .. "/" then
+        return real .. path:sub(#prefix + 1)
+      end
+    end
+    return path
+  end
+
   -- Default modes
   local DMODE = 0x1ED           -- 0755 dir
   local FMODE = 0x1A4           -- 0644 file
@@ -99,17 +123,17 @@ return function(K)
   -- ---- real-fs operations ----
 
   function M.is_dir(path)
-    return fs.isDir(path) == true
+    return fs.isDir(real_path(path)) == true
   end
 
   function M.exists(path)
-    return fs.exists(path) == true
+    return fs.exists(real_path(path)) == true
   end
 
   function M.list(path)
     local out = {}
     if fs.list then
-      for _, name in ipairs(fs.list(path)) do
+      for _, name in ipairs(fs.list(real_path(path))) do
         out[#out + 1] = name
       end
     end
@@ -117,20 +141,20 @@ return function(K)
   end
 
   function M.make_dir(path)
-    if fs.makeDir then fs.makeDir(path) end
+    if fs.makeDir then fs.makeDir(real_path(path)) end
   end
 
   function M.remove(path)
-    if fs.delete then fs.delete(path) end
+    if fs.delete then fs.delete(real_path(path)) end
   end
 
   function M.open(path, mode)
-    return fs.open(path, mode)
+    return fs.open(real_path(path), mode)
   end
 
   -- Read a whole file as string
   function M.read_all(path)
-    local f = fs.open(path, "r")
+    local f = fs.open(real_path(path), "r")
     if not f then return nil end
     local data = f.readAll and f.readAll() or ""
     f.close()
@@ -139,7 +163,7 @@ return function(K)
 
   -- Write a whole file
   function M.write_all(path, data)
-    local f = fs.open(path, "w")
+    local f = fs.open(real_path(path), "w")
     if not f then return nil end
     f.write(data)
     f.close()

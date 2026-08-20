@@ -212,9 +212,17 @@ return function(K)
         -- pointer events: feed /dev/input raw-event readers only
         M.wake("input", "input", ev)
       elseif name == "peripheral" then
-        -- device hotplug: wake devctl readers with a structured event
+        -- device hotplug: mount/unmount disk drives, wake devctl readers
+        local side = ev[2]
         local kind = ev[3] == "detach" and "detach" or "attach"
-        M.wake("devctl", "devctl", kind .. " " .. tostring(ev[2]))
+        if K.vfs and K.vfs.drive_side then
+          if kind == "attach" then
+            K.vfs.drive_side(side)
+          else
+            K.vfs.drive_side(side, true)
+          end
+        end
+        M.wake("devctl", "devctl", kind .. " " .. tostring(side))
       elseif name == "http_success" then
         if K.ipc and K.ipc.http_event then K.ipc.http_event("success", ev[2]) end
       elseif name == "http_failure" then

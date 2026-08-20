@@ -1,0 +1,16 @@
+NAME
+  stat - KNUCK syscall
+
+SYNOPSIS
+  stat(path) -> info
+
+DESCRIPTION
+  Stat a path. Returns {size, type, mode, uid, gid, nlink}.
+
+RETURN VALUES
+  table or nil,err
+
+SEE ALSO
+  fstat readdir
+
+KNUCK(2) manual page. Part of the KNUCK kernel distribution.
