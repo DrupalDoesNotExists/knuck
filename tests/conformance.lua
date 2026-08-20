@@ -1,15 +1,15 @@
 --[[
   KNUCK Conformance Test
   ======================
-  Прогон по всей поверхности сисколлов KNUCK.
-  Запуск: на реальном CC-компьютере (CraftOS / CC:Tweaked).
-  Результат: матрица OK / LIMITED / CUT / ERROR по каждой функции.
+  Runs the full KNUCK syscall surface.
+  Run on a real CC computer (CraftOS / CC:Tweaked).
+  Result: OK / LIMITED / CUT / ERROR matrix per function.
 
-  Секция 1: ПЛАТФОРМА — проверка допущений о рантайме (работает на голом CraftOS).
-  Секция 2: ЯДРО — проверка сисколлов KNUCK (работает внутри KNUCK).
+  Section 1: PLATFORM - checks runtime assumptions (runs on bare CraftOS).
+  Section 2: KERNEL - checks KNUCK syscalls (runs inside KNUCK).
 
-  Безопасно: ничего не перезагружает, не удаляет, не пишет в системные пути.
-  reboot/halt — только проверка наличия, без вызова.
+  Safe: does not reboot, delete, or write to system paths.
+  reboot/halt - presence check only, never called.
 ]]
 
 local results = {}
@@ -17,12 +17,12 @@ local function report(name, status, detail)
   results[#results + 1] = { name = name, status = status, detail = detail }
 end
 
--- Постраничный вывод: строка → ждёт клавишу → чистит экран
+-- Paged output: line -> wait for key -> clear screen
 local function page(text)
   term.clear()
   term.setCursorPos(1, 1)
   io.write(text .. "\n")
-  io.write("--- нажми любую клавишу ---")
+  io.write("--- press any key ---")
   os.pullEvent("key")
 end
 
@@ -52,11 +52,11 @@ local function probe(fn, ...)
 end
 
 -- ============================================================
--- СЕКЦИЯ 1: ПЛАТФОРМА
+-- SECTION 1: PLATFORM
 -- ============================================================
-section("1. ПЛАТФОРМА (CraftOS / рантайм)")
+section("1. PLATFORM (CraftOS / runtime)")
 
--- 1.1 Версия Lua
+-- 1.1 Lua version
 local luaver = _VERSION or "unknown"
 page("Lua version: " .. tostring(luaver))
 if luaver:find("5.2") or luaver:find("5.3") or luaver:find("5.4") then
@@ -73,7 +73,7 @@ else
   cut("debug.sethook", "debug library or sethook missing")
 end
 
--- 1.3 yield из count hook (ключевое для вытесняющего планировщика)
+-- 1.3 yield from count hook (key for preemptive scheduler)
 if sethook_ok then
   local co = coroutine.create(function()
     local n = 0
@@ -90,7 +90,7 @@ if sethook_ok then
     local ok_res, val = coroutine.resume(co)
     if ok_res and val == "HOOK_YIELD" then
       hook_yielded = true
-      -- продолжить после yield из hook
+      -- resume after yield from hook
       local ok_res2, val2 = coroutine.resume(co)
       return ok_res2, val2
     end
@@ -102,7 +102,7 @@ if sethook_ok then
     cut("yield_from_hook", "hook fired=" .. tostring(hook_fired) ..
       " yielded=" .. tostring(hook_yielded) .. " res=" .. tostring(res_hook))
   end
-  debug.sethook(co) -- снять hook
+  debug.sethook(co) -- remove hook
 else
   cut("yield_from_hook", "no sethook")
 end
@@ -155,7 +155,7 @@ end
 if type(http) == "table" then
   ok("http.api", "present")
 else
-  cut("http.api", "http table missing (AF_HTTP недоступен)")
+  cut("http.api", "http table missing (AF_HTTP unavailable)")
 end
 
 -- 1.8 term API
@@ -172,7 +172,7 @@ else
   cut("coroutine", "missing")
 end
 
--- 1.10 _ENV / песочница (load с окружением)
+-- 1.10 _ENV / sandbox (load with environment)
 local env_ok = false
 local ok_load, load_res = pcall(function()
   local sandbox = { print = print, string = string, math = math, table = table }
@@ -185,7 +185,7 @@ else
   limited("sandbox_env", "load with env: " .. tostring(load_res))
 end
 
--- 1.11 collectgarbage (учёт памяти)
+-- 1.11 collectgarbage (memory accounting)
 if type(collectgarbage) == "function" then
   ok("collectgarbage", "present, count=" .. tostring(collectgarbage("count")))
 else
@@ -199,23 +199,23 @@ else
   cut("error_handling", "pcall/xpcall missing")
 end
 
--- 1.13 Таймаут-сторож CC (watchdog)
+-- 1.13 CC watchdog note
 page("  note: CC watchdog ~7s soft abort / +1.5s hard abort (TimeoutState)")
 
 -- ============================================================
--- СЕКЦИЯ 2: ЯДРО KNUCK
+-- SECTION 2: KNUCK KERNEL
 -- ============================================================
-section("2. ЯДРО KNUCK (сисколлы)")
+section("2. KNUCK KERNEL (syscalls)")
 
--- Детект окружения: есть ли таблица сисколлов ядра
+-- Detect environment: kernel syscall table present?
 local K = rawget(_G, "knuck") or rawget(_G, "k")
 local in_kernel = type(K) == "table" and type(K.syscall) == "function"
 if not in_kernel then
-  page("  Ядро не обнаружено — сисколлы не проверяются.")
-  page("  Запустите тест ВНУТРИ KNUCK для секции 2.")
+  page("  Kernel not detected - syscalls not checked.")
+  page("  Run this test INSIDE KNUCK for section 2.")
 end
 
--- Хелпер: проверить сисколл
+-- Helper: check a syscall
 local function syscall(name, fn, ...)
   if not in_kernel then
     report(name, "SKIP", "kernel not present")
@@ -229,7 +229,7 @@ local function syscall(name, fn, ...)
   end
 end
 
--- 2.1 Процессы
+-- 2.1 Processes
 section("2.1 proc")
 if in_kernel then
   syscall("getpid", function() return K.syscall("getpid") end)
@@ -248,7 +248,7 @@ if in_kernel then
   syscall("time", function() return K.syscall("time") end)
   syscall("clock", function() return K.syscall("clock") end)
 
-  -- spawn/exec/exit/waitpid — осторожно: порождаем дочерний процесс
+  -- spawn/exec/exit/waitpid - spawn a child process
   local child_ok, child_pid = pcall(function()
     return K.syscall("spawn", "/bin/true")
   end)
@@ -266,25 +266,25 @@ if in_kernel then
     err("spawn", tostring(child_pid))
   end
 
-  -- setuid/setgid — только проверка наличия (не меняем реальные креды)
+  -- setuid/setgid - presence check only (do not change real creds)
   syscall("setuid", function() return K.syscall("setuid", K.syscall("getuid")) end)
   syscall("setgid", function() return K.syscall("setgid", K.syscall("getgid")) end)
   syscall("setpgid", function() return K.syscall("setpgid", K.syscall("getpid"), K.syscall("getpid")) end)
 
-  -- сигналы
+  -- signals
   syscall("signal", function() return K.syscall("signal", 2, nil) end)
   syscall("sigprocmask", function() return K.syscall("sigprocmask", "block", {}) end)
   syscall("alarm", function() return K.syscall("alarm", 0) end)
   syscall("kill", function() return K.syscall("kill", K.syscall("getpid"), 0) end)
 
-  -- планировщик
+  -- scheduler
   syscall("sched_setscheduler", function() return K.syscall("sched_setscheduler", nil, "other") end)
   syscall("setpriority", function() return K.syscall("setpriority", nil, 0) end)
 
-  -- chdir (в /tmp, безопасно)
+  -- chdir (to /tmp, safe)
   syscall("chdir", function() return K.syscall("chdir", "/tmp") end)
 
-  -- fork — ожидаем CUT (платформа)
+  -- fork - expected CUT (platform)
   local fok, fres = pcall(function() return K.syscall("fork") end)
   if fok then
     limited("fork", "unexpectedly present: " .. tostring(fres))
@@ -295,7 +295,7 @@ else
   page("  (kernel not present)")
 end
 
--- 2.2 Безопасность
+-- 2.2 Security
 section("2.2 security")
 if in_kernel then
   syscall("chmod", function() return K.syscall("chmod", "/tmp", 420) end) -- 0o644
@@ -312,7 +312,7 @@ if in_kernel then
   local pok, pres = pcall(function() return K.syscall("pipe") end)
   if pok and pres then
     ok("pipe", "rfd=" .. tostring(pres[1]) .. " wfd=" .. tostring(pres[2]))
-    -- запись/чтение через пайп
+    -- write/read through pipe
     local wok2, wres2 = pcall(function()
       K.syscall("write", pres[2], "hello")
       return K.syscall("read", pres[1], 5)
@@ -340,7 +340,7 @@ if in_kernel then
     err("socket_af_unix", tostring(sres))
   end
 
-  -- socket (AF_MODEM) — только если есть модем
+  -- socket (AF_MODEM) - only if a modem is attached
   local has_modem = type(peripheral) == "table" and peripheral.find and peripheral.find("modem") ~= nil
   if has_modem then
     local sok2, sres2 = pcall(function() return K.syscall("socket", "modem", "dgram", 0) end)
@@ -354,7 +354,7 @@ if in_kernel then
     cut("socket_af_modem", "no modem attached")
   end
 
-  -- socket (AF_HTTP) — только если http доступен
+  -- socket (AF_HTTP) - only if http is available
   if type(http) == "table" then
     local sok3, sres3 = pcall(function() return K.syscall("socket", "http", "stream", 0) end)
     if sok3 and sres3 then
@@ -377,7 +377,7 @@ end
 -- 2.4 VFS
 section("2.4 vfs")
 if in_kernel then
-  -- временный файл в /tmp
+  -- temp file in /tmp
   local fok, ffd = pcall(function() return K.syscall("open", "/tmp/conftest.txt", "w+") end)
   if fok and ffd then
     ok("open", "fd=" .. tostring(ffd))
@@ -417,14 +417,14 @@ if in_kernel then
   syscall("unlink", function() return K.syscall("unlink", "/tmp/conftest2.txt") end)
   syscall("rmdir", function() return K.syscall("rmdir", "/tmp/conftest_dir") end)
 
-  -- mount/umount — только проверка наличия (не трогаем реальные монтирования)
+  -- mount/umount - presence check only (do not touch real mounts)
   syscall("mount", function() return K.syscall("mount", nil, nil, "tmp", "ro") end)
   syscall("umount", function() return K.syscall("umount", "/tmp") end)
 
-  -- chroot — проверка наличия (не меняем корень)
+  -- chroot - presence check only (do not change root)
   syscall("chroot", function() return K.syscall("chroot", "/") end)
 
-  -- /dev ноды
+  -- /dev nodes
   for _, node in ipairs({ "/dev/console", "/dev/null", "/dev/zero", "/dev/urandom", "/dev/input", "/dev/devctl" }) do
     local nok, nres = pcall(function() return K.syscall("stat", node) end)
     if nok and nres then
@@ -457,7 +457,7 @@ else
   page("  (kernel not present)")
 end
 
--- 2.5 Модули
+-- 2.5 Modules
 section("2.5 modules")
 if in_kernel then
   syscall("insmod", function() return K.syscall("insmod", "/boot/modules/testmod.lua") end)
@@ -466,24 +466,24 @@ else
   page("  (kernel not present)")
 end
 
--- 2.6 Сеть
+-- 2.6 Network
 section("2.6 network")
 if in_kernel then
-  -- конфиг через /sys/net (чтение)
+  -- config via /sys/net (read)
   local nok, nres = pcall(function() return K.syscall("read", K.syscall("open", "/sys/net/ip", "r")) end)
   if nok then
     ok("net_ip", tostring(nres))
   else
     cut("net_ip", tostring(nres))
   end
-  -- ARP-кэш
+  -- ARP cache
   local aok, ares = pcall(function() return K.syscall("read", K.syscall("open", "/sys/net/arp", "r")) end)
   if aok then
     ok("net_arp", tostring(ares))
   else
     cut("net_arp", tostring(ares))
   end
-  -- маршруты
+  -- routes
   local rok, rres = pcall(function() return K.syscall("read", K.syscall("open", "/sys/net/route", "r")) end)
   if rok then
     ok("net_route", tostring(rres))
@@ -494,10 +494,10 @@ else
   page("  (kernel not present)")
 end
 
--- 2.7 Консоль/ввод
+-- 2.7 Console/input
 section("2.7 console")
 if in_kernel then
-  -- ioctl на консоли (режим cooked/raw)
+  -- ioctl on console (cooked/raw mode)
   local iok, ires = pcall(function() return K.syscall("ioctl", 0, "getmode") end)
   if iok then
     ok("ioctl_getmode", tostring(ires))
@@ -514,18 +514,18 @@ else
   page("  (kernel not present)")
 end
 
--- 2.8 Питание — только наличие, НЕ вызываем
+-- 2.8 Power - presence only, NOT called
 section("2.8 power")
 if in_kernel then
   local rok, rres = pcall(function() return K.syscall("reboot") end)
   if rok then
-    limited("reboot", "present (не вызываем в тесте)")
+    limited("reboot", "present (not called in test)")
   else
     err("reboot", tostring(rres))
   end
   local hok, hres = pcall(function() return K.syscall("halt") end)
   if hok then
-    limited("halt", "present (не вызываем в тесте)")
+    limited("halt", "present (not called in test)")
   else
     err("halt", tostring(hres))
   end
@@ -534,9 +534,9 @@ else
 end
 
 -- ============================================================
--- ИТОГ
+-- SUMMARY
 -- ============================================================
-section("ИТОГ")
+section("SUMMARY")
 local counts = { OK = 0, LIMITED = 0, CUT = 0, ERROR = 0, SKIP = 0 }
 for _, r in ipairs(results) do
   counts[r.status] = (counts[r.status] or 0) + 1
@@ -544,9 +544,9 @@ end
 page(string.format("OK: %d   LIMITED: %d   CUT: %d   ERROR: %d   SKIP: %d",
   counts.OK or 0, counts.LIMITED or 0, counts.CUT or 0, counts.ERROR or 0, counts.SKIP or 0))
 
-page("--- Детали ---")
+page("--- Details ---")
 for _, r in ipairs(results) do
-  page(string.format("[%s] %s%s", r.status, r.name, r.detail ~= "" and (" — " .. r.detail) or ""))
+  page(string.format("[%s] %s%s", r.status, r.name, r.detail ~= "" and (" - " .. r.detail) or ""))
 end
 
-page("Тест завершён. Скопируйте вывод и пришлите его разработчику.")
+page("Test finished. Copy the output and send it to the developer.")
