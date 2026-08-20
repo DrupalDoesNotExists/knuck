@@ -74,7 +74,7 @@ return function(K)
     if proc.uid == 0 then
       -- root bypasses r/w; execute needs at least one x bit
       if want == "x" then
-        return (ino.mode & 0x49) ~= 0  -- any execute bit (0111 octal)
+        return K.bit.band(ino.mode, 0x49) ~= 0  -- any execute bit (0111 octal)
       end
       return true
     end
@@ -87,7 +87,7 @@ return function(K)
       shift = 0
     end
     local bit = (want == "r") and 4 or (want == "w") and 2 or 1
-    return (ino.mode & (bit << shift)) ~= 0
+    return K.bit.band(ino.mode, bit * (2 ^ shift)) ~= 0
   end
 
   -- Apply umask to a requested mode
