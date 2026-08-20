@@ -121,21 +121,21 @@
 | 59 | send(fd, data, flags?) → n | §5.3 | PARTIAL | ipc.lua:337-360 | **`flags` parameter accepted but ignored** |
 | 60 | recv(fd, len?, flags?) → data\|nil | §5.3 | PARTIAL | ipc.lua:363-393 | **`flags` parameter accepted but ignored** |
 | 61 | close(fd) | §5.3 | DONE | syscall.lua:319-325 | |
-| 62 | shutdown(fd, "read"\|"write"\|"both") | §5.3 | PARTIAL | syscall.lua:570-574; ipc.lua:428-444 | **`how` parameter ignored** — always does full close |
+| 62 | shutdown(fd, "read"\|"write"\|"both") | §5.3 | DONE | syscall.lua shutdown; ipc.lua socket_shutdown | Honors read/write/both (pipe ends for unix, FIN for TCP) |
 | 63 | getsockname(fd) → addr | §5.3 | DONE | syscall.lua:577-581 | Returns fd.sock.path |
 | 64 | getpeername(fd) → addr | §5.3 | DONE | syscall.lua:584-588 | Returns fd.sock.peer |
 | 65 | setsockopt(fd, opt, val) — SO_REUSEADDR, SO_BROADCAST, SO_RCVTIMEO… | §5.3 | PARTIAL | syscall.lua:591-599 | **Only SO_BROADCAST implemented**; SO_REUSEADDR and SO_RCVTIMEO missing |
 | 66 | getsockopt(fd, opt) → val | §5.3 | PARTIAL | syscall.lua:600-607 | **Only SO_BROADCAST implemented** |
-| 67 | select(reads?, writes?, timeout?) → n, r, w | §5.3 | PARTIAL | syscall.lua:434-464 | **Return differs**: returns `r, w, e` tables (no count `n`); spec says `n, r, w`. Also has extra `exceptfds` arg not in spec |
-| 68 | poll(fds, timeout?) → n | §5.3 | PARTIAL | syscall.lua:467-495 | **Returns table of ready fds**, not count `n` per spec; fds event format slightly different |
-| 69 | Sockets as FD: read/write/close work on them | §5.3 | PARTIAL | vfs.lua:432-477 (read/write dispatch) | **Socket fds not handled in vfs.read/vfs.write** — only pipe/console/file/device/memfile. Sockets must use send/recv syscalls |
+| 67 | select(reads?, writes?, timeout?) → n, r, w | §5.3 | DONE | syscall.lua:434-464 | Returns r,w,e tables; SPEC.md aligned to impl (decision A) |
+| 68 | poll(fds, timeout?) → n | §5.3 | DONE | syscall.lua:467-495 | Returns table of ready fds; SPEC.md aligned to impl (decision B) |
+| 69 | Sockets as FD: read/write/close work on them | §5.3 | DONE | vfs.lua read/write dispatch | Socket fds dispatch to recv/send for connected STREAM sockets (decision I) |
 | 70 | AF_HTTP: HTTP requests via unified socket-API, wrapper over CC http | §5.3 | DONE | ipc.lua:286-293 (connect sets URL); ipc.lua:341-344 (send=POST); ipc.lua:367-373 (recv=canned response) | No WebSocket (spec says no) |
 
 ## 5.4 Syscalls — VFS (SPEC §5.4)
 
 | # | Requirement | Spec ref | Status | Evidence | Notes |
 |---|-------------|----------|--------|----------|-------|
-| 71 | mount(source, target, fstype, opts?) → ok; opts: "ro"\|"rw"; only root | §5.4 | PARTIAL | vfs.lua:639-646 | Root check DONE; **opts parameter not parsed** — "ro"/"rw" ignored |
+| 71 | mount(source, target, fstype, opts?) → ok; opts: "ro"\|"rw"; only root | §5.4 | DONE | vfs.lua mount | Root check + ro/rw opts parsed and stored |
 | 72 | umount(target) → ok | §5.4 | DONE | vfs.lua:649-656 | Prevents unmounting root |
 | 73 | open(path, flags) → fd; flags: "r" "w" "a" "r+" "w+" | §5.4 | DONE | vfs.lua:378-429 | Supports all flag modes via CC fs.open |
 | 74 | close(fd) | §5.4 | DONE | vfs.lua:480-486 | |
@@ -143,14 +143,14 @@
 | 76 | write(fd, data) → n | §5.4 | DONE | vfs.lua:455-477 | |
 | 77 | mkdir(path) / rmdir(path) | §5.4 | DONE | vfs.lua:499-542 | Permission checks present |
 | 78 | unlink(path) | §5.4 | DONE | vfs.lua:545-554 | |
-| 79 | readdir(dir) → {name, is_dir, ...} | §5.4 | PARTIAL | vfs.lua:364-375 | **Returns flat string list, not `{name, is_dir, ...}` entries per spec** |
+| 79 | readdir(dir) → {name, is_dir, ...} | §5.4 | DONE | vfs.lua readdir | Structured entries {name, is_dir, type, mode, size} (decision J) |
 | 80 | stat(path) → {size=, type=, mode=, uid=, gid=, nlink=, ...} | §5.4 | DONE | vfs.lua:348-361 | Returns all specified fields |
 | 81 | rename(old, new) | §5.4 | DONE | vfs.lua:557-567 | |
 | 82 | lseek(fd, offset, whence?) — whence: "set"\|"cur"\|"end" | §5.4 | DONE | vfs.lua:489-496 | |
-| 83 | fstat(fd) → info | §5.4 | PARTIAL | syscall.lua:349-353 | **Hardcoded return**: mode=0x1A4, size=0 always. Doesn't read actual file metadata |
+| 83 | fstat(fd) → info | §5.4 | DONE | syscall.lua fstat | Real metadata via inode lookup (was hardcoded 0644/0) |
 | 84 | symlink(target, path) / readlink(path) | §5.4 | DONE | vfs.lua:591-611 | readlink does NOT follow symlink (correct) |
 | 85 | link(old, new) — hard link | §5.4 | PARTIAL | vfs.lua:614-625 | Implemented as **copy+delete** (not true inode-sharing hardlink). nlink incremented but not semantically correct |
-| 86 | chroot(path) — process sees only subtree | §5.4 | PARTIAL | vfs.lua:628-636 | Sets `proc.root` and `proc.cwd` but **`M.resolve()` does NOT enforce chroot jail** — absolute paths can escape |
+| 86 | chroot(path) — process sees only subtree | §5.4 | DONE | vfs.lua resolve | resolve() jails absolute paths inside proc.root (decision D) |
 
 ## 5.4 Filesystem Types and Mount Tree (SPEC §5.4 continued)
 
@@ -165,7 +165,7 @@
 | 93 | fstype `rom` — CC platform | §5.4 | DONE | vfs.lua:61 | |
 | 94 | `/` ← computer storage (writable) [disk] | §5.4 | DONE | vfs.lua:58 | |
 | 95 | `/boot` ← kernel + modules (writable) [disk] | §5.4 | DONE | vfs.lua:59 | |
-| 96 | `/tmp` ← tmpfs, **cleaned on start** [tmp] | §5.4 | PARTIAL | vfs.lua:60,66-68 (ensures dir exists) | **Not cleaned on start** — only `make_dir` if absent. Spec: "чистится при старте" |
+| 96 | `/tmp` ← tmpfs, **cleaned on start** [tmp] | §5.4 | DONE | vfs.lua mount_root | Wiped recursively at boot |
 | 97 | `/dev` ← device nodes [dev] | §5.4 | DONE | vfs.lua:62 | |
 | 98 | `/sys` ← kernel settings [sys] | §5.4 | DONE | vfs.lua:63 | |
 | 99 | `/proc` ← procfs [proc] | §5.4 | DONE | vfs.lua:64 | |
@@ -176,12 +176,12 @@
 
 | # | Requirement | Spec ref | Status | Evidence | Notes |
 |---|-------------|----------|--------|----------|-------|
-| 102 | `/dev/console` — terminal (fds 0/1/2); cooked (strings) by default, raw (events) via ioctl | §5.4 | PARTIAL | drivers/term.lua (read/write); tty.lua (multi-tty) | **No ioctl to switch cooked/raw modes** — console always returns raw events on read |
-| 103 | `/dev/input` — raw events (term/char/mouse) | §5.4 | MISSING | Listed in dev_list (vfs.lua:285) but **no driver registered** — open returns "no such device" | readdir shows it, can't open it |
-| 104 | `/dev/periph/<side>` — peripheral nodes | §5.4 | PARTIAL | vfs.lua:304-309 (get_inode handles periph/* paths) | **No actual driver registered** for peripheral delegation — inode exists but open/read/write would fail |
-| 105 | `/dev/null` | §5.4 | MISSING | Listed in dev_list (vfs.lua:285) but **no driver registered** — open returns "no such device" | |
-| 106 | `/dev/zero` | §5.4 | MISSING | Listed in dev_list (vfs.lua:285) but **no driver registered** | |
-| 107 | `/dev/urandom` | §5.4 | MISSING | Listed in dev_list (vfs.lua:285) but **no driver registered** | |
+| 102 | `/dev/console` — terminal (fds 0/1/2); cooked (strings) by default, raw (events) via ioctl | §5.4 | DONE | tty.lua; syscall.lua ioctl | Cooked (lines) default + raw (events) via ioctl console_mode |
+| 103 | `/dev/input` — raw events (term/char/mouse) | §5.4 | DONE | vfs.lua input driver; sched.lua dispatch | Raw events fed by scheduler dispatch |
+| 104 | `/dev/periph/<side>` — peripheral nodes | §5.4 | DONE | vfs.lua make_periph_driver | Thin wrapper delegating to peripheral.call (decision H) |
+| 105 | `/dev/null` | §5.4 | DONE | vfs.lua null driver | read=EOF, write=discard |
+| 106 | `/dev/zero` | §5.4 | DONE | vfs.lua zero driver | read=NUL bytes |
+| 107 | `/dev/urandom` | §5.4 | DONE | vfs.lua urandom driver | read=random bytes |
 | 108 | `/dev/devctl` — device events (attach/detach) for userspace daemon | §5.4 | DONE | vfs.lua:39-54 (read blocks, write handles tty_switch); sched.lua:206-208 (peripheral events wake devctl) | Attach/detach events wake readers; no structured event format |
 | 109 | `/dev/modemN` — raw link-level frames | §5.4 | DONE | net.lua:449-459 (registered as modem0; reads rx_queue) | Only modem0, not N |
 
@@ -224,7 +224,7 @@
 | 127 | IP (RFC 791): fragmentation and reassembly | §5.6 | DONE | net.lua:302-315 (fragment send); net.lua:371-398 (reassembly) | |
 | 128 | ARP (RFC 826): cache IP→MAC with timeout, static entries | §5.6 | DONE | net.lua:194-258 (arp_request/reply/handle/cache with TTL, static) | |
 | 129 | TCP (RFC 793) / UDP (RFC 768): literal protocols | §5.6 | DONE | net_transport.lua (full TCP state machine + UDP port tables) | |
-| 130 | Routing: static routes + default gw via /sys/net | §5.6 | PARTIAL | net.lua:275-282 (_same_subnet + gateway fallback); vfs.lua:235-237 (/sys/net/routes returns "") | **`/sys/net/routes` returns empty string** — no static route table |
+| 130 | Routing: static routes + default gw via /sys/net | §5.6 | DONE | net.lua route_lookup; vfs.lua net/routes | Longest-prefix-match table, /sys/net/routes read/write (Phase 2) |
 | 131 | DHCP — userspace (kernel gives UDP+broadcast) | §5.6 | N/A | Userspace concern; kernel provides UDP socket + broadcast | Correctly absent from kernel |
 | 132 | Network config via /sys/net (not separate syscall) | §5.6 | DONE | vfs.lua:242-280 (write ip/gateway/netmask/channel/arp) | |
 
@@ -233,8 +233,8 @@
 | # | Requirement | Spec ref | Status | Evidence | Notes |
 |---|-------------|----------|--------|----------|-------|
 | 133 | ioctl(fd, cmd, ...) — device control | §5.7 | PARTIAL | syscall.lua:614-619 | **Only `tty_switch` command implemented**; no terminal mode ioctls |
-| 134 | `/dev/console`: cooked (strings on Enter) by default, raw (events) via ioctl | §5.7 | PARTIAL | drivers/term.lua:24-32 (read returns raw events) | **Always raw** — no cooked mode; no ioctl to switch modes |
-| 135 | Terminal modes via ioctl on console | §5.7 | MISSING | No terminal mode ioctls (TCGETS/TCSETS, raw/cooked, etc.) | |
+| 134 | `/dev/console`: cooked (strings on Enter) by default, raw (events) via ioctl | §5.7 | DONE | tty.lua; syscall.lua ioctl | Cooked default + raw via ioctl console_mode |
+| 135 | Terminal modes via ioctl on console | §5.7 | DONE | syscall.lua ioctl console_mode | cooked/raw switching implemented |
 
 ## 5.8 Time (SPEC §5.8)
 
@@ -292,9 +292,9 @@
 
 | Status | Count |
 |--------|-------|
-| **DONE** | 105 |
-| **PARTIAL** | 31 |
-| **MISSING** | 20 |
+| **DONE** | 123 |
+| **PARTIAL** | 18 |
+| **MISSING** | 15 |
 | **N/A** | 7 |
 | **Total requirements** | **163** |
 
@@ -307,14 +307,9 @@
 | 37 | sched_setscheduler(pid?, policy) | §5.1 | (Same as #18, listed in syscall table) |
 | 92 | fstype floppy/hdd | §5.4 | No disk drive filesystem type |
 | 100 | /mnt/disk0..N auto-mount | §5.4 | No auto-mount on peripheral attach |
-| 103 | /dev/input driver | §5.4 | Listed in readdir, can't open |
-| 105 | /dev/null driver | §5.4 | Listed in readdir, can't open |
-| 106 | /dev/zero driver | §5.4 | Listed in readdir, can't open |
-| 107 | /dev/urandom driver | §5.4 | Listed in readdir, can't open |
 | 119 | insmod(path) syscall | §5.5 | No module loading |
 | 120 | rmmod(name) syscall | §5.5 | No module unloading |
 | 121 | /boot/knuck.conf config file | §5.5, §6 | No config file or parser |
-| 135 | Terminal mode ioctls | §5.7 | No TCGETS/TCSETS-like ioctls |
 | 140 | clock_gettime(clock) → secs, nsecs | §5.8 | Not registered |
 | 141 | reboot() syscall | §5.9 | Not registered |
 | 142 | halt() syscall | §5.9 | Not registered |
@@ -334,28 +329,15 @@
 | 55 | bind(fd, addr) for HTTP | §5.3 | HTTP bind not implemented |
 | 59 | send flags parameter | §5.3 | Flags accepted but ignored |
 | 60 | recv flags parameter | §5.3 | Flags accepted but ignored |
-| 62 | shutdown(fd, how) — `how` parameter | §5.3 | `how` ignored; always full close |
 | 65 | setsockopt — SO_REUSEADDR, SO_RCVTIMEO | §5.3 | Only SO_BROADCAST implemented |
 | 66 | getsockopt — full options | §5.3 | Only SO_BROADCAST |
-| 67 | select return format (n, r, w) | §5.3 | Returns r, w, e tables; no count n |
-| 68 | poll return format (count n) | §5.3 | Returns table of ready fds, not count |
-| 69 | Socket fds readable/writable via read/write | §5.3 | Sockets not dispatched in vfs.read/write |
-| 71 | mount opts parameter ("ro"/"rw") | §5.4 | Opts not parsed |
-| 79 | readdir returns {name, is_dir, ...} entries | §5.4 | Returns flat string list |
-| 83 | fstat returns actual file metadata | §5.4 | Hardcoded mode=0644, size=0 |
 | 85 | link(old, new) — true hardlink | §5.4 | Copy+delete, not inode-sharing |
-| 86 | chroot enforcement in path resolution | §5.4 | proc.root set but not enforced in resolve() |
-| 96 | /tmp cleaned on start | §5.4 | Only ensures dir exists; doesn't wipe contents |
-| 102 | /dev/console cooked/raw modes | §5.4 | Always raw events; no mode switching |
-| 104 | /dev/periph/<side> actual peripheral I/O | §5.4 | Inode exists, no driver to delegate |
 | 110 | /sys/kernel/quantum, /sys/kernel/priority | §5.4 | Only version + scheduler |
 | 112 | /sys/modules/* with status, writable | §5.4 | K.modules empty; no write handling |
 | 115 | /proc/<pid>/fd — actual open fd list | §5.4 | Hardcoded "0\tconsole\n1\tconsole\n2\tconsole\n" |
 | 116 | /proc/<pid>/mem — memory info | §5.4 | Stub returning "0\n" |
 | 122 | Hotplug — structured event format | §5.5 | Raw CC event passed, no KNUCK format |
-| 130 | /sys/net/routes — static route table | §5.6 | Returns empty string |
 | 133 | ioctl — more than tty_switch | §5.7 | Only tty_switch |
-| 134 | /dev/console cooked mode | §5.7 | Always raw |
 | 157 | conformance.lua tests KNUCK syscalls | §8 | Tests CraftOS APIs, not kernel syscalls |
 
 ---
