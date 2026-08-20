@@ -108,11 +108,18 @@ return function(K)
     if proc and proc.fds and proc.fds[1] then
       out = tostring(proc.fds[1].type or "?")
     end
-    return {
+    local res = {
       tty = (proc and proc.tty) or 1,
       active = K.tty and K.tty.active_id() or 1,
       cx = cx, cy = cy, w = w, h = h, out = out,
     }
+    if K.log then
+      K.log("diag: tty=" .. tostring(res.tty) .. " active=" .. tostring(res.active)
+        .. " cur=" .. tostring(cx) .. "," .. tostring(cy)
+        .. " size=" .. tostring(w) .. "x" .. tostring(h)
+        .. " out=" .. tostring(out))
+    end
+    return res
   end)
 
   -- spawn a child process
