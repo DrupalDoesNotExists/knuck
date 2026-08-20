@@ -108,6 +108,32 @@ else
   end
 end
 
+-- Configure /boot/init.rc so init starts the debug shell.
+-- init.rc format: "service <name> <path> <args...>"
+local INITRC = "/boot/init.rc"
+local rc_line = "service shell " .. DEST .. "/sbin/sh.lua\n"
+local rc_existing = ""
+if fs.exists(INITRC) then
+  local h = fs.open(INITRC, "r")
+  if h then
+    rc_existing = h.readAll() or ""
+    h.close()
+  end
+end
+if rc_existing:find("service shell", 1, true) then
+  print("init.rc already has shell service")
+else
+  local h = fs.open(INITRC, "w")
+  if h then
+    h.write(rc_existing .. rc_line)
+    h.close()
+    print("init.rc configured: shell service added to " .. INITRC)
+  else
+    print("WARNING: could not write " .. INITRC .. " - add manually:")
+    print("  " .. rc_line)
+  end
+end
+
 print("")
 print("Run the kernel now:")
 print("  lua " .. DEST .. "/knuck.lua")
