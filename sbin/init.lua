@@ -97,5 +97,62 @@ rmdir("/tmp/test")
 local st4 = stat("/tmp/test")
 print("rmdir gone: " .. tostring(st4 == nil))
 
+-- ---- IPC tests ----
+print("-- IPC tests --")
+
+-- pipe
+local pr, pw = pipe()
+print("pipe: " .. tostring(pr) .. "," .. tostring(pw))
+write(pw, "pipe-data")
+local pdata = read(pr, 100)
+print("pipe read: " .. tostring(pdata))
+close(pr)
+close(pw)
+
+-- select
+local pr2, pw2 = pipe()
+local r, w = select({ pr2 }, nil, nil, 0.1)
+print("select empty: " .. tostring(#r))
+write(pw2, "x")
+r, w = select({ pr2 }, nil, nil, 0.1)
+print("select ready: " .. tostring(#r))
+close(pr2)
+close(pw2)
+
+-- AF_UNIX socket server
+local srv = socket("unix", "stream", 0)
+print("srv socket: " .. tostring(srv))
+bind(srv, "/tmp/sock")
+listen(srv, 4)
+print("srv listening")
+
+local sock_child = spawn("/knuck/sbin/ipc_child.lua", "sock")
+print("spawned sock child " .. tostring(sock_child))
+
+local conn = accept(srv)
+print("srv accept: " .. tostring(conn))
+local msg = recv(conn, 100)
+print("srv recv: " .. tostring(msg))
+send(conn, "pong")
+print("srv sent pong")
+close(conn)
+close(srv)
+waitpid(sock_child)
+
+-- mkfifo + fifo
+mkfifo("/tmp/fifo", 0x1A4)
+print("mkfifo ok")
+local fifo_child = spawn("/knuck/sbin/ipc_child.lua", "fifo")
+print("spawned fifo child " .. tostring(fifo_child))
+local ff = open("/tmp/fifo", "r")
+print("fifo open: " .. tostring(ff))
+if ff then
+  local fdata = read(ff, 100)
+  print("fifo read: " .. tostring(fdata))
+  close(ff)
+end
+waitpid(fifo_child)
+unlink("/tmp/fifo")
+
 print("init: done")
 exit(0)

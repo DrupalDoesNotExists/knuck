@@ -50,6 +50,16 @@ return function(K)
     devices[name] = driver
   end
 
+  -- Register a socket inode (AF_UNIX bind)
+  function M.set_socket(path, sock)
+    fs_mod.set_inode(path, { type = "socket", sock = sock, mode = 0x1B6, uid = 0, gid = 0, nlink = 1 })
+  end
+
+  -- Drop a socket inode (AF_UNIX close)
+  function M.drop_socket(path)
+    fs_mod.drop_inode(path)
+  end
+
   -- ---- path resolution ----
 
   -- Normalize a path to canonical absolute form
@@ -262,7 +272,7 @@ return function(K)
   end
 
   -- open a path -> fd table or nil,err
-  function M.open(proc, path, flags, mode)
+  function M.open(proc, path, flags, mode, on_open)
     local p = M.resolve(proc, path)
     local m = M.find_mount(p)
     if not m then return nil, "no such file" end
@@ -295,6 +305,15 @@ return function(K)
       return { type = "device", device = ino.device, driver = drv, mode = flags or "r" }
     end
 
+    if ino.type == "fifo" then
+      local creating = flags and flags:find("w") ~= nil
+      if creating then
+        return K.ipc.fifo_open_write(proc, ino, on_open)
+      else
+        return K.ipc.fifo_open_read(proc, ino, on_open)
+      end
+    end
+
     if m.fstype == "proc" or m.fstype == "sys" then
       local data = (m.fstype == "proc") and proc_read(p) or sys_read(p)
       return { type = "memfile", data = data or "", pos = 0 }
@@ -307,12 +326,14 @@ return function(K)
   end
 
   -- read from an fd
-  function M.read(fd, n)
+  function M.read(proc, fd, n)
     if not fd then return nil, "bad fd" end
     if fd.type == "console" then
       local drv = devices["console"]
       if drv and drv.read then return drv.read(n) end
       return nil
+    elseif fd.type == "pipe_r" then
+      return K.ipc.pipe_read(proc, fd, n)
     elseif fd.type == "file" then
       local data = fd.handle.read(n or 0)
       return data
@@ -328,12 +349,14 @@ return function(K)
   end
 
   -- write to an fd
-  function M.write(fd, data)
+  function M.write(proc, fd, data)
     if not fd then return nil, "bad fd" end
     if fd.type == "console" then
       local drv = devices["console"]
       if drv and drv.write then return drv.write(data) end
       return nil, "no console driver"
+    elseif fd.type == "pipe_w" then
+      return K.ipc.pipe_write(proc, fd, data)
     elseif fd.type == "file" then
       fd.handle.write(data)
       return #data
@@ -379,6 +402,21 @@ return function(K)
     if not fs_mod.check_access(proc, pino, "w") then return nil, "permission denied" end
     fs_mod.make_dir(p)
     fs_mod.set_inode(p, { type = "dir", mode = fs_mod.apply_umask(proc, mode or 0x1ED), uid = proc.uid, gid = proc.gid, nlink = 1 })
+    return true
+  end
+
+  -- mkfifo
+  function M.mkfifo(proc, path, mode)
+    local p = M.resolve(proc, path)
+    local parent = p:match("^(.*)/[^/]+$") or "/"
+    local pino = M.get_inode(parent)
+    if not pino or pino.type ~= "dir" then return nil, "no such directory" end
+    if not fs_mod.check_access(proc, pino, "w") then return nil, "permission denied" end
+    local ino = K.ipc.fifo_create()
+    ino.mode = fs_mod.apply_umask(proc, mode or 0x1A4)
+    ino.uid = proc.uid
+    ino.gid = proc.gid
+    fs_mod.set_inode(p, ino)
     return true
   end
 

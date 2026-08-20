@@ -49,11 +49,14 @@ return function(K)
     return best
   end
 
-  -- Mark a process as waiting on reason/key
-  function M.wait(proc, reason, key)
+  -- Mark a process as waiting on reason/key. resume_fn (optional) computes
+  -- the value to resume the process with on wake; if absent, the wake
+  -- result is used.
+  function M.wait(proc, reason, key, resume_fn)
     proc.state = "waiting"
     proc.wait_reason = reason
     proc.wait_key = key
+    proc.resume_fn = resume_fn
     waiting[reason] = waiting[reason] or {}
     waiting[reason][key] = proc
   end
@@ -67,7 +70,12 @@ return function(K)
     w[key] = nil
     proc.wait_reason = nil
     proc.wait_key = nil
-    M.resume(proc, result)
+    local r = result
+    if proc.resume_fn then
+      r = proc.resume_fn()
+      proc.resume_fn = nil
+    end
+    M.resume(proc, r)
   end
 
   -- Resume a process with a result (or nil). Re-enqueues it.
@@ -126,7 +134,7 @@ return function(K)
         run(proc)
       else
         -- Idle: wait for an OS event, dispatch to waiting processes
-        local ev = K.env.os.pullEvent()
+        local ev = { K.env.os.pullEvent() }
         K.events.dispatch(ev)
       end
     end

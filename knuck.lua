@@ -40,6 +40,7 @@ K.syscall = K.loader.load("/knuck/kernel/syscall.lua", K)
 K.proc = K.loader.load("/knuck/kernel/proc.lua", K)
 K.fs = K.loader.load("/knuck/kernel/fs.lua", K)
 K.vfs = K.loader.load("/knuck/kernel/vfs.lua", K)
+K.ipc = K.loader.load("/knuck/kernel/ipc.lua", K)
 
 -- 4. Init modules (dependency order)
 K.syscall.init(K)
