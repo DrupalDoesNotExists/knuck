@@ -41,24 +41,24 @@ local function readline(fd, echo)
     if v == "char" then
       local c = vals[2]
       if c == "\n" then
-        if echo then write("\n") end
+        if echo then write(1, "\n") end
         return buf
       end
       if c == "\b" then
-        if echo then write("\b \b") end
+        if echo then write(1, "\b \b") end
         buf = buf:sub(1, -2)
       elseif c ~= "\r" then
-        if echo then write(c) end
+        if echo then write(1, c) end
         buf = buf .. c
       end
     elseif v == "key" then
       local code = vals[2]
       if code == ENTER_KEY_CC or code == ENTER_KEY_TW then
-        if echo then write("\n") end
+        if echo then write(1, "\n") end
         return buf
       end
       if code == BS_KEY_CC or code == BS_KEY_TW then
-        if echo then write("\b \b") end
+        if echo then write(1, "\b \b") end
         buf = buf:sub(1, -2)
       end
     elseif v == nil then
