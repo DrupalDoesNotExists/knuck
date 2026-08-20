@@ -160,8 +160,11 @@ return function(K)
         if K.net and K.net.on_modem_message then
           K.net.on_modem_message(ev[2], ev[3], ev[4], ev[5], ev[6])
         end
-      elseif name == "char" or name == "key" or name == "key_up" or name == "mouse_click" then
-        -- console input: route to the active virtual terminal
+      elseif name == "char" or name == "key" then
+        -- console input: route to the active virtual terminal.
+        -- NOTE: do NOT route key_up/mouse_click here -- those are release/
+        -- pointer events and would corrupt the line buffer if a reader
+        -- consumed them as input.
         if K.tty then
           K.tty.handle_input(ev)
         else

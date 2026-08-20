@@ -56,10 +56,11 @@ local function readline(fd)
       -- EOF (file read returns empty string at end)
       if buf == "" then return nil end
       return buf
-    else
+    elseif type(v) == "string" then
       -- plain file data
       buf = buf .. v
     end
+    -- other event types (key_up, mouse_click, tables) are ignored
   end
 end
 
