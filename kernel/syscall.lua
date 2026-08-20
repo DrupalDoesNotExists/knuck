@@ -414,6 +414,20 @@ return function(K)
     return K.ipc.socket_recv(proc, fd, n)
   end)
 
+  -- sendto(fd, data, dest_ip, dest_port)  (AF_MODEM)
+  M.register("sendto", function(proc, fdnum, data, dest_ip, dest_port)
+    local fd = proc.fds[fdnum]
+    if not fd then return nil, "bad fd" end
+    return K.ipc.socket_sendto(proc, fd, data, dest_ip, dest_port)
+  end)
+
+  -- recvfrom(fd) -> data, src_ip, src_port  (AF_MODEM)
+  M.register("recvfrom", function(proc, fdnum)
+    local fd = proc.fds[fdnum]
+    if not fd then return nil, "bad fd" end
+    return K.ipc.socket_recvfrom(proc, fd)
+  end)
+
   -- shutdown(fd, how)
   M.register("shutdown", function(proc, fdnum, how)
     local fd = proc.fds[fdnum]
@@ -435,11 +449,22 @@ return function(K)
     return fd.sock.peer
   end)
 
-  -- setsockopt / getsockopt (no-op for now)
+  -- setsockopt / getsockopt (SO_BROADCAST for AF_MODEM)
   M.register("setsockopt", function(proc, fdnum, level, opt, val)
+    local fd = proc.fds[fdnum]
+    if not fd then return nil, "bad fd" end
+    if level == 1 and opt == 6 then  -- SOL_SOCKET, SO_BROADCAST
+      if fd.sock then fd.sock.broadcast = val == true or val == 1 end
+      return true
+    end
     return true
   end)
   M.register("getsockopt", function(proc, fdnum, level, opt)
+    local fd = proc.fds[fdnum]
+    if not fd then return nil, "bad fd" end
+    if level == 1 and opt == 6 and fd.sock then  -- SO_BROADCAST
+      return fd.sock.broadcast and 1 or 0
+    end
     return nil
   end)
 

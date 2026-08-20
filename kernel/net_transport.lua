@@ -43,6 +43,12 @@ return function(K)
     udp_ports[port] = nil
   end
 
+  -- Is a bound UDP port readable (has queued datagrams)?
+  function M.udp_readable(port)
+    local p = udp_ports[port]
+    return p ~= nil and #p.queue > 0
+  end
+
   -- Send a UDP datagram from src_port to dest_ip:dest_port.
   function M.udp_send(src_port, dest_ip, dest_port, data)
     local len = 8 + #data

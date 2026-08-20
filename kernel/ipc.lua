@@ -209,14 +209,30 @@ return function(K)
       queue = {},               -- for datagram sockets (incoming messages)
       peer = nil,
       closed = false,
+      -- network sockets
+      port = nil,               -- AF_MODEM bound UDP port
+      broadcast = false,        -- SO_BROADCAST
+      url = nil,                -- AF_HTTP target URL
+      response = nil,           -- AF_HTTP canned response
     }
     next_sock = next_sock + 1
     return { type = "socket", sock = s }
   end
 
-  -- Bind a socket to a path (AF_UNIX)
+  -- Bind a socket to a path (AF_UNIX) or port (AF_MODEM)
   function M.socket_bind(proc, fd, path)
     local s = fd.sock
+    if s.domain == "modem" then
+      -- AF_MODEM: bind to a UDP port (root-only)
+      if proc.uid ~= 0 then return nil, "permission denied" end
+      local port = tonumber(path)
+      if not port then return nil, "invalid port" end
+      local ok, err = K.net_transport.udp_bind(port)
+      if not ok then return nil, err end
+      s.state = "bound"
+      s.port = port
+      return true
+    end
     if s.domain ~= "unix" then return nil, "invalid argument" end
     if unix_sockets[path] then return nil, "address in use" end
     s.state = "bound"
@@ -263,6 +279,14 @@ return function(K)
   -- Connect to a listening socket (blocks until accepted)
   function M.socket_connect(proc, fd, path)
     local s = fd.sock
+    if s.domain == "http" then
+      -- AF_HTTP: connect sets the target URL (STREAM only)
+      if s.socktype ~= "stream" then return nil, "invalid argument" end
+      s.state = "connected"
+      s.url = path
+      s.peer = path
+      return true
+    end
     local server = unix_sockets[path]
     if not server or server.state ~= "listening" then
       return nil, "connection refused"
@@ -309,6 +333,12 @@ return function(K)
   function M.socket_send(proc, fd, data)
     local s = fd.sock
     if s.closed then return nil, "closed" end
+    if s.domain == "http" then
+      -- AF_HTTP: send = POST body; canned response
+      if s.state ~= "connected" then return nil, "not connected" end
+      s.response = "HTTP/1.1 200 OK\r\nContent-Length: " .. #data .. "\r\n\r\n" .. data
+      return #data
+    end
     if s.socktype == "datagram" then
       -- datagram: send to peer's queue
       local target = s.peer_sock
@@ -329,6 +359,15 @@ return function(K)
   function M.socket_recv(proc, fd, n)
     local s = fd.sock
     if s.closed then return nil end
+    if s.domain == "http" then
+      -- AF_HTTP: recv returns the canned response
+      if s.response then
+        local r = s.response
+        s.response = nil
+        return r
+      end
+      return nil
+    end
     if s.socktype == "datagram" then
       if #s.queue > 0 then
         return table.remove(s.queue, 1)
@@ -347,6 +386,27 @@ return function(K)
     if not conn then return nil, "not connected" end
     local inp = (conn.client == s) and conn.to_client or conn.to_server
     return M.pipe_read(proc, { type = "pipe_r", pipe = inp }, n)
+  end
+
+  -- Send a datagram to a specific address (AF_MODEM)
+  function M.socket_sendto(proc, fd, data, dest_ip, dest_port)
+    local s = fd.sock
+    if s.closed then return nil, "closed" end
+    if s.domain ~= "modem" then return nil, "invalid argument" end
+    if s.state ~= "bound" then return nil, "not bound" end
+    if dest_ip == string.char(255, 255, 255, 255) and not s.broadcast then
+      return nil, "permission denied"  -- SO_BROADCAST required
+    end
+    return K.net_transport.udp_send(s.port, dest_ip, dest_port, data)
+  end
+
+  -- Receive a datagram with sender address (AF_MODEM). Blocks.
+  function M.socket_recvfrom(proc, fd)
+    local s = fd.sock
+    if s.closed then return nil end
+    if s.domain ~= "modem" then return nil, "invalid argument" end
+    if s.state ~= "bound" then return nil, "not bound" end
+    return K.net_transport.udp_recv(proc, s.port)
   end
 
   -- Wake a socket's recv waiters
@@ -382,6 +442,12 @@ return function(K)
   -- Socket readiness (for select)
   function M.socket_readable(s)
     if s.closed then return true end
+    if s.domain == "modem" then
+      return s.port ~= nil and K.net_transport.udp_readable(s.port)
+    end
+    if s.domain == "http" then
+      return s.response ~= nil
+    end
     if s.socktype == "datagram" then return #s.queue > 0 end
     if s.state == "listening" then return #s.backlog > 0 end
     if s.conn then
@@ -393,6 +459,8 @@ return function(K)
 
   function M.socket_writable(s)
     if s.closed then return false end
+    if s.domain == "modem" then return s.state == "bound" end
+    if s.domain == "http" then return s.state == "connected" end
     if s.socktype == "datagram" then return s.peer_sock ~= nil end
     if s.state == "connected" and s.conn then
       local out = (s.conn.client == s) and s.conn.to_server or s.conn.to_client
