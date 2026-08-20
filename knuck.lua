@@ -53,7 +53,8 @@ end
 -- Terminal writer with explicit newline/wrap handling.
 -- CC's term.write does not reliably wrap or advance lines across versions,
 -- so the kernel manages cursor movement itself: split on \n, write in
--- screen-width chunks, scroll at the bottom edge.
+-- screen-width chunks, scroll at the bottom edge. A line is advanced ONLY
+-- on a real \n, so raw partial writes (e.g. shell input echo) stay inline.
 function K.term_write(s)
   local t = term
   local text = tostring(s or "")
@@ -67,15 +68,27 @@ function K.term_write(s)
     if t.write then t.write(text) end
     return
   end
-  if text:sub(-1) ~= "\n" then text = text .. "\n" end
-  for line in text:gmatch("(.-)\n") do
+  local pos = 1
+  while pos <= #text do
+    local nl = text:find("\n", pos, true)
+    local seg, has_nl
+    if nl then
+      seg = text:sub(pos, nl - 1)
+      has_nl = true
+      pos = nl + 1
+    else
+      seg = text:sub(pos)
+      has_nl = false
+      pos = #text + 1
+    end
+    -- write seg with wrapping
     local cx, cy = t.getCursorPos()
     local col = cx or 1
     local i = 1
-    while i <= #line do
+    while i <= #seg do
       local avail = w - col + 1
       if avail < 1 then avail = 1 end
-      local chunk = line:sub(i, i + avail - 1)
+      local chunk = seg:sub(i, i + avail - 1)
       t.write(chunk)
       i = i + #chunk
       col = col + #chunk
@@ -89,12 +102,15 @@ function K.term_write(s)
         col = 1
       end
     end
-    cy = cy + 1
-    if cy > h then
-      t.scroll(1)
-      cy = h
+    -- advance line only on an actual newline
+    if has_nl then
+      cy = cy + 1
+      if cy > h then
+        t.scroll(1)
+        cy = h
+      end
+      t.setCursorPos(1, cy)
     end
-    t.setCursorPos(1, cy)
   end
 end
 
