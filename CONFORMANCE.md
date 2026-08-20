@@ -12,6 +12,7 @@
 | **DONE** | Fully implemented per spec |
 | **PARTIAL** | Exists but incomplete or deviates from spec |
 | **MISSING** | Not implemented at all |
+| **CUT** | Platform limitation (CC physics), documented in SPEC.md |
 | **N/A** | Not applicable on CC:Tweaked platform |
 
 ---
@@ -114,7 +115,7 @@
 | 52 | pipe() → rfd, wfd — anonymous pipe | §5.3 | DONE | ipc.lua:47-51; syscall.lua:420-426 | |
 | 53 | mkfifo(path, mode) — named pipe | §5.3 | DONE | vfs.lua:516-528; syscall.lua:429-431 | Blocking open/read/write semantics |
 | 54 | socket(domain, type, proto) → fd | §5.3 | DONE | ipc.lua:203-224; syscall.lua:498-503 | Supports unix/stream, modem/dgram, http/stream |
-| 55 | bind(fd, addr) — inet/unix/http addr formats | §5.3 | PARTIAL | ipc.lua:227-248 | Unix path binding DONE; modem port binding DONE; **HTTP bind not implemented** (http only has connect) |
+| 55 | bind(fd, addr) — inet/unix/http addr formats | §5.3 | CUT | ipc.lua:227-248 | Unix path + modem port binding DONE; HTTP bind CUT (CC http has no server side) |
 | 56 | listen(fd, backlog) | §5.3 | DONE | ipc.lua:251-257 | |
 | 57 | accept(fd) → fd — blocking | §5.3 | DONE | ipc.lua:263-281; syscall.lua:520-532 | Blocks until connection arrives |
 | 58 | connect(fd, addr) | §5.3 | DONE | ipc.lua:284-318 | Unix, HTTP supported; modem uses sendto instead |
@@ -149,7 +150,7 @@
 | 82 | lseek(fd, offset, whence?) — whence: "set"\|"cur"\|"end" | §5.4 | DONE | vfs.lua:489-496 | |
 | 83 | fstat(fd) → info | §5.4 | DONE | syscall.lua fstat | Real metadata via inode lookup (was hardcoded 0644/0) |
 | 84 | symlink(target, path) / readlink(path) | §5.4 | DONE | vfs.lua:591-611 | readlink does NOT follow symlink (correct) |
-| 85 | link(old, new) — hard link | §5.4 | PARTIAL | vfs.lua:614-625 | Implemented as **copy+delete** (not true inode-sharing hardlink). nlink incremented but not semantically correct |
+| 85 | link(old, new) — hard link | §5.4 | CUT | vfs.lua:614-625 | Copy+delete (no inode on CC); nlink incremented. Documented CUT in SPEC.md |
 | 86 | chroot(path) — process sees only subtree | §5.4 | DONE | vfs.lua resolve | resolve() jails absolute paths inside proc.root (decision D) |
 
 ## 5.4 Filesystem Types and Mount Tree (SPEC §5.4 continued)
@@ -293,8 +294,9 @@
 | Status | Count |
 |--------|-------|
 | **DONE** | 154 |
-| **PARTIAL** | 2 |
+| **PARTIAL** | 0 |
 | **MISSING** | 0 |
+| **CUT** | 2 |
 | **N/A** | 7 |
 | **Total requirements** | **163** |
 
@@ -304,10 +306,14 @@ None — all MISSING requirements closed.
 
 ### Every PARTIAL item (needs completion)
 
-| # | Requirement | Spec ref | What's missing |
-|---|-------------|----------|----------------|
-| 55 | bind(fd, addr) for HTTP | §5.3 | HTTP bind not implemented (http only has connect) |
-| 85 | link(old, new) — true hardlink | §5.4 | Copy+delete, not inode-sharing (platform CUT candidate) |
+None — all PARTIAL requirements closed.
+
+### CUT items (platform limitations, documented in SPEC.md)
+
+| # | Requirement | Spec ref | Why CUT |
+|---|-------------|----------|---------|
+| 55 | bind(fd, addr) for HTTP | §5.3 | CC http has no server side; HTTP socket is connect-only (client) |
+| 85 | link(old, new) — true hardlink | §5.4 | CC has no inode; implemented as copy+delete |
 
 ---
 

@@ -38,6 +38,8 @@
   - Аппаратная изоляция памяти — одна куча VM. На CraftOS 1.9 без `collectgarbage`
     жёсткие бюджеты памяти невозможны; смягчение — песочницы + бюджет инструкций + сторож CC.
   - Сигналы памяти (SEGV/FPE/ABRT) — источник в Lua — uncaught error → маппится на SIGSEGV.
+  - `bind` для AF_HTTP — CC `http` не имеет серверной стороны; HTTP-сокет только `connect` (клиент).
+  - `link` (жёсткая ссылка) — CC не имеет inode; реализуется copy+delete, nlink инкрементируется.
 - Сторож CC: ~7s soft abort / +1.5s hard abort — страховка от зависания ядра.
 
 ## 3. Изоляция процессов
@@ -113,7 +115,7 @@ chgrp(path, gid)
 pipe() → rfd, wfd                 -- анонимный пайп
 mkfifo(path, mode)                -- именованный пайп
 socket(domain, type, proto) → fd  -- AF_UNIX|AF_MODEM|AF_HTTP × STREAM|DGRAM
-bind(fd, addr)                    -- inet: {ip=, port=}; unix: {path=}; http: {host=, port=}
+bind(fd, addr)                    -- inet: {ip=, port=}; unix: {path=}; http: {host=, port=} [CUT: http — только connect]
 listen(fd, backlog)
 accept(fd) → fd                   -- блокирующий
 connect(fd, addr)
@@ -150,7 +152,7 @@ rename(old, new)
 lseek(fd, offset, whence?)        -- whence: "set"|"cur"|"end"
 fstat(fd) → info
 symlink(target, path) / readlink(path)
-link(old, new)                    -- жёсткая ссылка
+link(old, new)                    -- жёсткая ссылка [CUT: copy+delete, нет inode]
 chroot(path)                      -- процесс видит только поддерево
 ```
 
