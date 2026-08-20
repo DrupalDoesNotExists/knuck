@@ -31,7 +31,7 @@ return function(K)
         local e = {
           name = name, pass = pass or "", uid = tonumber(uid) or 0,
           gid = tonumber(gid) or 0, gecos = gecos or "", home = home or "/",
-          shell = shell or "/knuck/sbin/sh.lua",
+          shell = shell or "/bin/sh.lua",
         }
         passwd[name] = e
         by_uid[e.uid] = e

@@ -27,7 +27,7 @@ return function(K)
   function M.init(K)
     fs_mod = K.fs
     -- register device drivers
-    local term_drv = K.loader.load("/knuck/kernel/drivers/term.lua", K)
+    local term_drv = K.loader.load("/lib/knuck/kernel/drivers/term.lua", K)
     M.register_device("console", term_drv)
     -- virtual terminals /dev/tty1..ttyN
     if K.tty then

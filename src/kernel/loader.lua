@@ -6,8 +6,8 @@
   that takes the kernel namespace `K` and returns its exports.
 
   Usage:
-    local loader = loadfile("/knuck/kernel/loader.lua", "t", K.env)()
-    local sched = loader.load("/knuck/kernel/sched.lua", K)
+    local loader = loadfile("/lib/knuck/kernel/loader.lua", "t", K.env)()
+    local sched = loader.load("/lib/knuck/kernel/sched.lua", K)
 ]]
 
 local M = {}

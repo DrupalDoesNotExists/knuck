@@ -9,7 +9,7 @@
     5. Init modules, mount VFS.
     6. Start scheduler -> run init process.
 
-  Run: lua /knuck/knuck.lua
+  Run: lua /lib/knuck/boot.lua
 ]]
 
 -- Kernel namespace. Kernel code runs with full globals (os/fs/term/...).
@@ -148,24 +148,24 @@ function K.term_write(s)
 end
 
 -- 1. Loader
-K.loader = loadfile("/knuck/kernel/loader.lua", "t", K.env)()
+K.loader = loadfile("/lib/knuck/kernel/loader.lua", "t", K.env)()
 
 -- 2. Self-diagnostics
-local diag = K.loader.load("/knuck/kernel/diag.lua", K)
+local diag = K.loader.load("/lib/knuck/kernel/diag.lua", K)
 K.diag = diag
 K.selfcheck = diag.run(K)
 
 -- 3. Core modules
-K.sched = K.loader.load("/knuck/kernel/sched.lua", K)
-K.syscall = K.loader.load("/knuck/kernel/syscall.lua", K)
-K.proc = K.loader.load("/knuck/kernel/proc.lua", K)
-K.fs = K.loader.load("/knuck/kernel/fs.lua", K)
-K.vfs = K.loader.load("/knuck/kernel/vfs.lua", K)
-K.ipc = K.loader.load("/knuck/kernel/ipc.lua", K)
-K.net = K.loader.load("/knuck/kernel/net.lua", K)
-K.net_transport = K.loader.load("/knuck/kernel/net_transport.lua", K)
-K.auth = K.loader.load("/knuck/kernel/auth.lua", K)
-K.tty = K.loader.load("/knuck/kernel/tty.lua", K)
+K.sched = K.loader.load("/lib/knuck/kernel/sched.lua", K)
+K.syscall = K.loader.load("/lib/knuck/kernel/syscall.lua", K)
+K.proc = K.loader.load("/lib/knuck/kernel/proc.lua", K)
+K.fs = K.loader.load("/lib/knuck/kernel/fs.lua", K)
+K.vfs = K.loader.load("/lib/knuck/kernel/vfs.lua", K)
+K.ipc = K.loader.load("/lib/knuck/kernel/ipc.lua", K)
+K.net = K.loader.load("/lib/knuck/kernel/net.lua", K)
+K.net_transport = K.loader.load("/lib/knuck/kernel/net_transport.lua", K)
+K.auth = K.loader.load("/lib/knuck/kernel/auth.lua", K)
+K.tty = K.loader.load("/lib/knuck/kernel/tty.lua", K)
 
 -- 4. Init modules (dependency order)
 K.syscall.init(K)
@@ -183,7 +183,7 @@ if ndrives > 0 then
 end
 
 -- 5a. Load /boot/knuck.conf (extra modules + init path)
-local init_path = "/knuck/sbin/init.lua"
+local init_path = "/sbin/init.lua"
 local ok_conf, conf = pcall(K.fs.read_all, "/boot/knuck.conf")
 if ok_conf and conf then
   for line in (conf .. "\n"):gmatch("([^\n]*)\n") do
@@ -231,7 +231,7 @@ if not K.selfcheck.collectgarbage then
 end
 
 -- 7. Spawn init (pid 1)
-local init_pid = K.proc.spawn("/knuck/sbin/init.lua", 0, 0, 0, {})
+local init_pid = K.proc.spawn("/sbin/init.lua", 0, 0, 0, {})
 if init_pid then
   K.proc.set_init(init_pid)
   print("  init pid " .. init_pid)
