@@ -92,7 +92,27 @@ return function(K)
   M.register("clear", function(proc)
     K.env.term.clear()
     K.env.term.setCursorPos(1, 1)
+    if K.log then K.log("shell: clear") end
     return true
+  end)
+
+  -- diag: report terminal/tty state so the shell can self-diagnose rendering.
+  -- Returns { tty, active, cx, cy, w, h, out } where out is the type of fd 1.
+  M.register("diag", function(proc)
+    local cx, cy = 0, 0
+    local w, h = 0, 0
+    local t = K.env.term
+    if t and t.getCursorPos then cx, cy = t.getCursorPos() end
+    if t and t.getSize then w, h = t.getSize() end
+    local out = "?"
+    if proc and proc.fds and proc.fds[1] then
+      out = tostring(proc.fds[1].type or "?")
+    end
+    return {
+      tty = (proc and proc.tty) or 1,
+      active = K.tty and K.tty.active_id() or 1,
+      cx = cx, cy = cy, w = w, h = h, out = out,
+    }
   end)
 
   -- spawn a child process

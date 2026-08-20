@@ -197,7 +197,12 @@ if not console then
 end
 
 clear()
-print("KNUCK sh - type 'help' for builtins, 'exit' to quit")
+print("KNUCK sh v2 - type 'help' for builtins, 'exit' to quit")
+local d = diag()
+print("DIAG tty=" .. tostring(d.tty) .. " active=" .. tostring(d.active)
+  .. " cur=" .. tostring(d.cx) .. "," .. tostring(d.cy)
+  .. " size=" .. tostring(d.w) .. "x" .. tostring(d.h)
+  .. " out=" .. tostring(d.out))
 print("SHELL READY")  -- diag: any output after clear() must render below banner
 while true do
   print("sh# ")
