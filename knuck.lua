@@ -43,6 +43,8 @@ K.vfs = K.loader.load("/knuck/kernel/vfs.lua", K)
 K.ipc = K.loader.load("/knuck/kernel/ipc.lua", K)
 K.net = K.loader.load("/knuck/kernel/net.lua", K)
 K.net_transport = K.loader.load("/knuck/kernel/net_transport.lua", K)
+K.auth = K.loader.load("/knuck/kernel/auth.lua", K)
+K.tty = K.loader.load("/knuck/kernel/tty.lua", K)
 
 -- 4. Init modules (dependency order)
 K.syscall.init(K)
@@ -56,6 +58,12 @@ K.vfs.mount_root()
 -- 5b. Init network (gracefully disables if no modem)
 K.net.init()
 K.net_transport.init()
+
+-- 5c. Load account database
+K.auth.init(K)
+
+-- 5d. Init virtual terminals
+K.tty.init(K)
 
 -- 6. Boot banner
 term.clear()

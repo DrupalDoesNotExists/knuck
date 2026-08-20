@@ -27,11 +27,16 @@ local FILES = {
   "kernel/ipc.lua",
   "kernel/net.lua",
   "kernel/net_transport.lua",
+  "kernel/auth.lua",
+  "kernel/tty.lua",
   "kernel/drivers/term.lua",
   "sbin/init.lua",
   "sbin/hello.lua",
   "sbin/ipc_child.lua",
   "sbin/sh.lua",
+  "sbin/useradd.lua",
+  "sbin/groupadd.lua",
+  "sbin/deluser.lua",
   "tests/vfs_ipc_test.lua",
 }
 

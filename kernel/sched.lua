@@ -153,8 +153,12 @@ return function(K)
           K.net.on_modem_message(ev[2], ev[3], ev[4], ev[5], ev[6])
         end
       elseif name == "char" or name == "key" or name == "key_up" or name == "mouse_click" then
-        -- console input: wake processes reading /dev/console or /dev/input
-        M.wake("input", "console", ev)
+        -- console input: route to the active virtual terminal
+        if K.tty then
+          K.tty.handle_input(ev)
+        else
+          M.wake("input", "console", ev)
+        end
       elseif name == "peripheral" then
         -- device hotplug: wake devctl readers
         M.wake("devctl", "devctl", ev)

@@ -60,7 +60,7 @@ return function(K)
   end
 
   -- Spawn a process from a VFS path
-  function M.spawn(path, ppid, uid, gid, args)
+  function M.spawn(path, ppid, uid, gid, args, tty)
     local env = make_env()
     local fn, err = load_process(path, env)
     if not fn then return nil, err end
@@ -82,6 +82,7 @@ return function(K)
       root = "/",
       umask = 0x12,  -- 0022 octal
       state = "ready",
+      tty = tty or 1,
       env = env,
       fds = { [0] = { type = "console", mode = "r" }, [1] = { type = "console", mode = "w" }, [2] = { type = "console", mode = "w" } },
       children = {},

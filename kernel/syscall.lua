@@ -91,7 +91,7 @@ return function(K)
   -- spawn a child process
   M.register("spawn", function(proc, path, ...)
     local args = { ... }
-    return proc_mod.spawn(path, proc.pid, proc.uid, proc.gid, args)
+    return proc_mod.spawn(path, proc.pid, proc.uid, proc.gid, args, proc.tty)
   end)
 
   -- waitpid (blocking)
@@ -466,6 +466,59 @@ return function(K)
       return fd.sock.broadcast and 1 or 0
     end
     return nil
+  end)
+
+  -- ============================================================
+  -- Virtual terminals (tty)
+  -- ============================================================
+
+  -- ioctl(fd, request, arg): tty_switch switches the active terminal.
+  M.register("ioctl", function(proc, fdnum, request, arg)
+    if request == "tty_switch" then
+      return K.tty.switch(arg)
+    end
+    return nil
+  end)
+
+  -- ============================================================
+  -- Account database (auth)
+  -- ============================================================
+  M.register("getpwnam", function(proc, name)
+    return K.auth.getpwnam(name)
+  end)
+
+  -- getpwuid(uid) -> entry table or nil
+  M.register("getpwuid", function(proc, uid)
+    return K.auth.getpwuid(uid)
+  end)
+
+  -- getgrnam(name) -> group table or nil
+  M.register("getgrnam", function(proc, name)
+    return K.auth.getgrnam(name)
+  end)
+
+  -- getgrgid(gid) -> group table or nil
+  M.register("getgrgid", function(proc, gid)
+    return K.auth.getgrgid(gid)
+  end)
+
+  -- login(name, pass) -> uid, gid or nil
+  M.register("login", function(proc, name, pass)
+    return K.auth.login(name, pass)
+  end)
+
+  -- setuid(uid): only root may change to arbitrary uid; else must match own
+  M.register("setuid", function(proc, uid)
+    if proc.uid ~= 0 and uid ~= proc.uid then return nil, "permission denied" end
+    proc.uid, proc.euid = uid, uid
+    return true
+  end)
+
+  -- setgid(gid): only root may change to arbitrary gid
+  M.register("setgid", function(proc, gid)
+    if proc.uid ~= 0 and gid ~= proc.gid then return nil, "permission denied" end
+    proc.gid, proc.egid = gid, gid
+    return true
   end)
 
   return M

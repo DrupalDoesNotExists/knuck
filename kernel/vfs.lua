@@ -29,6 +29,29 @@ return function(K)
     -- register device drivers
     local term_drv = K.loader.load("/knuck/kernel/drivers/term.lua", K)
     M.register_device("console", term_drv)
+    -- virtual terminals /dev/tty1..ttyN
+    if K.tty then
+      for i = 1, K.tty.count() do
+        M.register_device("tty" .. i, K.tty.make_driver(i))
+      end
+    end
+    -- devctl: control device. write "tty_switch <id>" switches active tty.
+    M.register_device("devctl", {
+      mode = 0x1B6,
+      write = function(data)
+        local s = tostring(data or "")
+        local id = s:match("tty_switch%s+(%d+)")
+        if id and K.tty then
+          return K.tty.switch(tonumber(id)) and #s or 0
+        end
+        return #s
+      end,
+      read = function(n)
+        local proc = K.sched.current
+        K.sched.wait(proc, "devctl", "devctl")
+        return proc.pending_result
+      end,
+    })
   end
 
   function M.mount_root()
