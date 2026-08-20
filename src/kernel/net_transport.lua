@@ -101,6 +101,24 @@ return function(K)
   local tcp_conns = {}          -- conn objects (active + established)
   M.tcp_conns = tcp_conns       -- exposed for diagnostics/tests
 
+  -- Allocate an ephemeral local port (49152+ range, avoids listeners).
+  local next_tcp_ephemeral = 49152
+  function M.alloc_port()
+    local start = next_tcp_ephemeral
+    for i = 0, 16383 do
+      local port = start + (i % 16384)
+      local used = false
+      for conn in pairs(tcp_conns) do
+        if conn.local_port == port then used = true; break end
+      end
+      if not used and not tcp_ports[port] then
+        next_tcp_ephemeral = (port + 1) % 16384 + 49152
+        return port
+      end
+    end
+    return nil, "no free ports"
+  end
+
   local function new_conn()
     return {
       local_port = 0,
@@ -222,7 +240,13 @@ return function(K)
   -- Open a TCP connection to remote_ip:remote_port. Blocks until established.
   function M.tcp_connect(proc, remote_ip, remote_port, local_port)
     local conn = new_conn()
-    conn.local_port = local_port or 0
+    if local_port and local_port > 0 then
+      conn.local_port = local_port
+    else
+      local p, err = M.alloc_port()
+      if not p then return nil, err end
+      conn.local_port = p
+    end
     conn.remote_ip = remote_ip
     conn.remote_port = remote_port
     conn.local_ip = K.net.ip

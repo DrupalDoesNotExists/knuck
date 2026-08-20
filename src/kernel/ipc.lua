@@ -16,6 +16,7 @@ return function(K)
   local unix_sockets = {}       -- path -> listening socket
   local next_sock = 1
   local fd_ready_waiters = {}   -- processes blocked in select (no timeout)
+  local http_pending = {}       -- http.request obj -> { proc, socket }
 
   -- Block a process until some fd becomes ready (select, no timeout)
   function M.wait_fd_ready(proc, resume_fn)
@@ -218,6 +219,16 @@ return function(K)
       broadcast = false,        -- SO_BROADCAST
       url = nil,                -- AF_HTTP target URL
       response = nil,           -- AF_HTTP canned response
+      -- AF_MODEM STREAM/TCP
+      tcp_conn = nil,           -- TCP connection object (connect/accept)
+      tcp_listener = false,     -- this socket is a TCP listener
+      -- AF_HTTP real
+      http_request = nil,       -- pending http.request object
+      http_response = nil,      -- completed response { body, code, headers }
+      http_error = nil,         -- failure message
+      http_method = "GET",      -- GET | POST
+      http_headers = {},        -- request headers
+      http_body = nil,          -- POST body
     }
     next_sock = next_sock + 1
     return { type = "socket", sock = s }
@@ -237,6 +248,18 @@ return function(K)
       s.port = port
       return true
     end
+    if s.domain == "modem" and s.socktype == "stream" then
+      -- AF_MODEM STREAM: bind = listen on a TCP port (root-only)
+      if proc.uid ~= 0 then return nil, "permission denied" end
+      local port = tonumber(path)
+      if not port then return nil, "invalid port" end
+      local ok, err = K.net_transport.tcp_listen(port)
+      if not ok then return nil, err end
+      s.state = "listening"
+      s.port = port
+      s.tcp_listener = true
+      return true
+    end
     if s.domain ~= "unix" then return nil, "invalid argument" end
     if unix_sockets[path] then return nil, "address in use" end
     s.state = "bound"
@@ -250,6 +273,7 @@ return function(K)
   -- Listen on a bound socket
   function M.socket_listen(proc, fd, backlog)
     local s = fd.sock
+    if s.tcp_listener then return true end  -- TCP already listening from bind
     if s.state ~= "bound" then return nil, "not bound" end
     s.state = "listening"
     s.backlog_max = backlog or 8
@@ -262,6 +286,24 @@ return function(K)
   -- wrapper's table.unpack yields the value.
   function M.socket_accept(proc, fd, on_conn)
     local s = fd.sock
+    if s.tcp_listener then
+      -- AF_MODEM STREAM: accept from a TCP listener (blocks until a conn)
+      local on_conn_fn = function(conn)
+        local cs = {
+          id = next_sock,
+          domain = "modem",
+          socktype = "stream",
+          state = "connected",
+          tcp_conn = conn,
+          peer = K.net.ip_to_str(conn.remote_ip) .. ":" .. conn.remote_port,
+          queue = {},
+          closed = false,
+        }
+        next_sock = next_sock + 1
+        return { type = "socket", sock = cs }
+      end
+      return K.net_transport.tcp_accept(proc, s.port, on_conn_fn)
+    end
     if s.state ~= "listening" then return nil, "not listening" end
     if #s.backlog > 0 then
       local conn = table.remove(s.backlog, 1)
@@ -286,8 +328,32 @@ return function(K)
     if s.domain == "http" then
       -- AF_HTTP: connect sets the target URL (STREAM only)
       if s.socktype ~= "stream" then return nil, "invalid argument" end
+      if not path:match("^https?://") then return nil, "invalid url" end
+      if not http then return nil, "http not available" end
+      if not http.checkURL(path) then return nil, "url not allowed" end
       s.state = "connected"
       s.url = path
+      s.peer = path
+      return true
+    end
+    if s.domain == "modem" and s.socktype == "stream" then
+      -- AF_MODEM STREAM: TCP connect to ip:port
+      local ip_str, port_str = path:match("^(%d+%.%d+%.%d+%.%d+):(%d+)$")
+      if not ip_str then return nil, "invalid address" end
+      local dest_ip = K.net.str_to_ip(ip_str)
+      local dest_port = tonumber(port_str)
+      if not dest_ip or not dest_port then return nil, "invalid address" end
+      local ok, err = K.net_transport.tcp_connect(proc, dest_ip, dest_port, s.port or 0)
+      if not ok then return nil, err end
+      for conn in pairs(K.net_transport.tcp_conns) do
+        if conn.remote_ip == dest_ip and conn.remote_port == dest_port
+          and conn.state == "ESTABLISHED" then
+          s.tcp_conn = conn
+          break
+        end
+      end
+      if not s.tcp_conn then return nil, "connection failed" end
+      s.state = "connected"
       s.peer = path
       return true
     end
@@ -338,10 +404,32 @@ return function(K)
     local s = fd.sock
     if s.closed then return nil, "closed" end
     if s.domain == "http" then
-      -- AF_HTTP: send = POST body; canned response
+      -- AF_HTTP: send fires an async http.request and blocks for the response
       if s.state ~= "connected" then return nil, "not connected" end
-      s.response = "HTTP/1.1 200 OK\r\nContent-Length: " .. #data .. "\r\n\r\n" .. data
-      return #data
+      if not http then return nil, "http not available" end
+      if s.http_request then return nil, "request in progress" end
+      local url = s.url
+      local ok, req
+      if s.http_method == "POST" then
+        ok, req = http.request(url, s.http_body or data, s.http_headers or {})
+      else
+        local full_url = url
+        if data and #data > 0 then
+          full_url = full_url .. (url:find("?") and "&" or "?") .. data
+        end
+        ok, req = http.request(full_url)
+      end
+      if not ok then return nil, "request failed" end
+      s.http_request = req
+      http_pending[req] = { proc = proc, socket = s }
+      K.sched.wait(proc, "http_response", proc.pid)
+      return true
+    end
+    if s.domain == "modem" and s.tcp_conn then
+      -- AF_MODEM STREAM: TCP send
+      if s.closed then return nil, "closed" end
+      if s.tcp_conn.state ~= "ESTABLISHED" then return nil, "not connected" end
+      return K.net_transport.tcp_send(proc, s.tcp_conn, data)
     end
     if s.socktype == "datagram" then
       -- datagram: send to peer's queue
@@ -364,13 +452,24 @@ return function(K)
     local s = fd.sock
     if s.closed then return nil end
     if s.domain == "http" then
-      -- AF_HTTP: recv returns the canned response
-      if s.response then
-        local r = s.response
-        s.response = nil
-        return r
+      -- AF_HTTP: recv returns the response body (or error)
+      if s.http_response then
+        local r = s.http_response
+        s.http_response = nil
+        return "HTTP/1.1 " .. r.code .. " OK\r\nContent-Length: " .. #(r.body or "")
+          .. "\r\n\r\n" .. (r.body or "")
+      end
+      if s.http_error then
+        local e = s.http_error
+        s.http_error = nil
+        return nil, e
       end
       return nil
+    end
+    if s.domain == "modem" and s.tcp_conn then
+      -- AF_MODEM STREAM: TCP recv
+      if s.closed then return nil end
+      return K.net_transport.tcp_recv(proc, s.tcp_conn)
     end
     if s.socktype == "datagram" then
       if #s.queue > 0 then
@@ -429,6 +528,9 @@ return function(K)
     local s = fd.sock
     if s.closed then return true end
     s.closed = true
+    if s.tcp_conn and not s.tcp_conn.closed then
+      K.net_transport.tcp_close(s.tcp_conn)
+    end
     if s.path and unix_sockets[s.path] == s then
       unix_sockets[s.path] = nil
       K.vfs.drop_socket(s.path)
@@ -447,10 +549,15 @@ return function(K)
   function M.socket_readable(s)
     if s.closed then return true end
     if s.domain == "modem" then
+      if s.tcp_conn then
+        return #s.tcp_conn.recv_queue > 0
+          or s.tcp_conn.state == "CLOSE_WAIT"
+          or s.tcp_conn.state == "CLOSED"
+      end
       return s.port ~= nil and K.net_transport.udp_readable(s.port)
     end
     if s.domain == "http" then
-      return s.response ~= nil
+      return s.http_response ~= nil or s.http_error ~= nil
     end
     if s.socktype == "datagram" then return #s.queue > 0 end
     if s.state == "listening" then return #s.backlog > 0 end
@@ -463,7 +570,12 @@ return function(K)
 
   function M.socket_writable(s)
     if s.closed then return false end
-    if s.domain == "modem" then return s.state == "bound" end
+    if s.domain == "modem" then
+      if s.tcp_conn then
+        return s.tcp_conn.state == "ESTABLISHED" and #s.tcp_conn.send_queue == 0
+      end
+      return s.state == "bound"
+    end
     if s.domain == "http" then return s.state == "connected" end
     if s.socktype == "datagram" then return s.peer_sock ~= nil end
     if s.state == "connected" and s.conn then
@@ -489,6 +601,26 @@ return function(K)
     if fd.type == "console" then return true end
     if fd.type == "file" or fd.type == "memfile" then return true end
     return false
+  end
+
+  -- Handle an http_success/http_failure event from the scheduler: match the
+  -- completed request to its waiting process and wake it.
+  function M.http_event(kind, req, err_msg)
+    local entry = http_pending[req]
+    if not entry then return end
+    http_pending[req] = nil
+    local s = entry.socket
+    s.http_request = nil
+    if kind == "success" and req.readAll then
+      local body = req.readAll()
+      local code = req.getResponseCode and req.getResponseCode() or 0
+      local headers = req.getResponseHeaders and req.getResponseHeaders() or {}
+      req.close()
+      s.http_response = { body = body, code = code, headers = headers }
+    else
+      s.http_error = err_msg or "request failed"
+    end
+    K.sched.wake("http_response", entry.proc.pid, true)
   end
 
   return M

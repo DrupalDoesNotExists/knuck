@@ -206,6 +206,10 @@ return function(K)
       elseif name == "peripheral" then
         -- device hotplug: wake devctl readers
         M.wake("devctl", "devctl", ev)
+      elseif name == "http_success" then
+        if K.ipc and K.ipc.http_event then K.ipc.http_event("success", ev[2]) end
+      elseif name == "http_failure" then
+        if K.ipc and K.ipc.http_event then K.ipc.http_event("failure", ev[2], ev[3]) end
       end
     end,
   }

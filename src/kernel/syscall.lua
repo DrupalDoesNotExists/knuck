@@ -587,13 +587,19 @@ return function(K)
     return fd.sock.peer
   end)
 
-  -- setsockopt / getsockopt (SO_BROADCAST for AF_MODEM)
+  -- setsockopt / getsockopt (SO_BROADCAST for AF_MODEM; HTTP options)
+  -- HTTP level = 2: METHOD=1 (GET|POST), HEADERS=2 (table), BODY=3 (string)
   M.register("setsockopt", function(proc, fdnum, level, opt, val)
     local fd = proc.fds[fdnum]
     if not fd then return nil, "bad fd" end
     if level == 1 and opt == 6 then  -- SOL_SOCKET, SO_BROADCAST
       if fd.sock then fd.sock.broadcast = val == true or val == 1 end
       return true
+    end
+    if fd.sock and fd.sock.domain == "http" and level == 2 then
+      if opt == 1 then fd.sock.http_method = tostring(val or "GET"):upper(); return true
+      elseif opt == 2 then fd.sock.http_headers = val or {}; return true
+      elseif opt == 3 then fd.sock.http_body = val; return true end
     end
     return true
   end)

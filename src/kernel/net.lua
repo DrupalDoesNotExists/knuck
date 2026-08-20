@@ -77,6 +77,7 @@ return function(K)
   M.timers = {}                           -- timer_id -> action
   M.rx_queue = {}                         -- raw frames for /dev/modemN
   M.ip_id = 1
+  M.routes = {}                           -- { dest=ip4, mask=ip4, gw=ip4, metric=int }
 
   -- ---- helpers ----
 
@@ -281,6 +282,53 @@ return function(K)
     return true
   end
 
+  -- Count set bits in a 4-byte netmask (prefix length).
+  local function count_prefix_bits(mask)
+    local n = 0
+    for i = 1, 4 do
+      local b = mask:byte(i)
+      while b > 0 do
+        if b % 2 == 1 then n = n + 1 end
+        b = math.floor(b / 2)
+      end
+    end
+    return n
+  end
+
+  -- Bitwise AND of two 4-byte IP strings.
+  local function ip_band(a, b)
+    return string.char(band(a:byte(1), b:byte(1)), band(a:byte(2), b:byte(2)),
+      band(a:byte(3), b:byte(3)), band(a:byte(4), b:byte(4)))
+  end
+
+  -- Longest-prefix-match route lookup. Returns the next-hop IP (gateway, or
+  -- dest_ip for a directly-connected route), or nil if no route matches.
+  function M.route_lookup(dest_ip)
+    local best_match = -1
+    local best_gw = nil
+    for _, route in ipairs(M.routes) do
+      local match = true
+      for i = 1, 4 do
+        if band(dest_ip:byte(i), route.mask:byte(i)) ~= band(route.dest:byte(i), route.mask:byte(i)) then
+          match = false
+          break
+        end
+      end
+      if match then
+        local prefix = count_prefix_bits(route.mask)
+        if prefix > best_match then
+          best_match = prefix
+          if route.gw == string.char(0, 0, 0, 0) then
+            best_gw = dest_ip
+          else
+            best_gw = route.gw
+          end
+        end
+      end
+    end
+    return best_gw
+  end
+
   -- Build a full IP packet (header + payload). flags_frag is the 16-bit
   -- flags/fragment-offset field (offset in 8-byte units).
   function M._build_ip(dest_ip, proto, id, flags_frag, payload)
@@ -322,8 +370,10 @@ return function(K)
       M._send_ip_frame(BROADCAST_MAC, dest_ip, proto, payload)
       return #payload
     end
-    local target = dest_ip
-    if not M._same_subnet(dest_ip) then target = M.gateway end
+    local target = M.route_lookup(dest_ip)
+    if not target then
+      if M._same_subnet(dest_ip) then target = dest_ip else target = M.gateway end
+    end
     local entry = M.arp_cache[M.ip_to_str(target)]
     if entry then
       M._send_ip_frame(entry.mac, dest_ip, proto, payload)
@@ -445,6 +495,11 @@ return function(K)
     modem.open(M.channel)
     M.enabled = true
     K.log("net: enabled on " .. tostring(M.side) .. " mac " .. M.mac_to_str(M.mac))
+    -- Seed routing table: default route via gateway + directly-connected subnet
+    if M.gateway ~= string.char(0, 0, 0, 0) then
+      M.routes[1] = { dest = string.char(0, 0, 0, 0), mask = string.char(0, 0, 0, 0), gw = M.gateway, metric = 0 }
+    end
+    M.routes[#M.routes + 1] = { dest = ip_band(M.ip, M.netmask), mask = M.netmask, gw = string.char(0, 0, 0, 0), metric = 0 }
     -- /dev/modemN: thin wrapper over the same link layer (root-only, 0600)
     K.vfs.register_device("modem0", {
       mode = 0x180,

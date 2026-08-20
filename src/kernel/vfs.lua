@@ -233,7 +233,12 @@ return function(K)
       table.sort(parts)
       return table.concat(parts, "\n") .. "\n"
     elseif rest == "net/routes" then
-      return ""
+      local parts = {}
+      for _, route in ipairs(K.net.routes) do
+        parts[#parts + 1] = K.net.ip_to_str(route.dest) .. "/" .. K.net.ip_to_str(route.mask)
+          .. " gw " .. K.net.ip_to_str(route.gw) .. " metric " .. (route.metric or 0)
+      end
+      return table.concat(parts, "\n") .. "\n"
     end
     return nil
   end
@@ -275,6 +280,31 @@ return function(K)
       local mac6 = K.net.str_to_mac(mac)
       if not ip4 or not mac6 then return nil, "invalid arp entry" end
       K.net.arp_cache[ip] = { mac = mac6, ttl = 0, static = true }
+      return #data
+    elseif rest == "net/routes" then
+      -- delete: "del dest/mask gw"
+      local del_dest, del_mask, del_gw = value:match(
+        "^del%s+(%d+%.%d+%.%d+%.%d+)%s*/%s*(%d+%.%d+%.%d+%.%d+)%s+gw%s+(%d+%.%d+%.%d+%.%d+)$")
+      if del_dest then
+        local d, m, g = K.net.str_to_ip(del_dest), K.net.str_to_ip(del_mask), K.net.str_to_ip(del_gw)
+        for i = #K.net.routes, 1, -1 do
+          local r = K.net.routes[i]
+          if r.dest == d and r.mask == m and r.gw == g then
+            table.remove(K.net.routes, i)
+            return #data
+          end
+        end
+        return nil, "route not found"
+      end
+      -- add: "dest/mask gw metric"
+      local dest_s, mask_s, gw_s, metric_s = value:match(
+        "^(%d+%.%d+%.%d+%.%d+)%s*/%s*(%d+%.%d+%.%d+%.%d+)%s+gw%s+(%d+%.%d+%.%d+%.%d+)%s*(.*)")
+      if not dest_s then return nil, "invalid route format" end
+      local dest, mask, gw = K.net.str_to_ip(dest_s), K.net.str_to_ip(mask_s), K.net.str_to_ip(gw_s)
+      if not dest or not mask or not gw then return nil, "invalid ip in route" end
+      K.net.routes[#K.net.routes + 1] = {
+        dest = dest, mask = mask, gw = gw, metric = tonumber(metric_s) or 0,
+      }
       return #data
     end
     return nil, "read-only"
