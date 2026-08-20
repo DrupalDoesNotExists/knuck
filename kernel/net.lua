@@ -58,6 +58,7 @@ return function(K)
 
   local function bshl(a, n) return a * (2 ^ n) end
   local function bshr(a, n) return math.floor(a / (2 ^ n)) end
+  M.bxor = bxor
 
   -- ---- state ----
 
