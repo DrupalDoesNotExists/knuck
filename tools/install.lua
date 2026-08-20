@@ -100,31 +100,5 @@ for _, name in ipairs(MAN_NAMES) do
 end
 print("Installed " .. #MAN_NAMES .. " man pages, " .. man_total .. " bytes.")
 print("")
-
--- Configure autostart so the kernel boots on CC startup.
--- CraftOS 1.9 runs /startup at boot. Append the kernel run line.
-local STARTUP = "/startup"
-local line = "shell.run(\"" .. DEST .. "/knuck.lua\")\n"
-local existing = ""
-if fs.exists(STARTUP) then
-  local h = fs.open(STARTUP, "r")
-  if h then
-    existing = h.readAll() or ""
-    h.close()
-  end
-end
-if existing:find(line, 1, true) then
-  print("Autostart already configured in " .. STARTUP)
-else
-  local h = fs.open(STARTUP, "w")
-  if h then
-    h.write(existing .. line)
-    h.close()
-    print("Autostart configured: appended to " .. STARTUP)
-  else
-    print("WARNING: could not write " .. STARTUP .. " - add manually:")
-    print("  " .. line)
-  end
-end
-
-print("")
+print("Run the kernel now:")
+print("  lua " .. DEST .. "/knuck.lua")
