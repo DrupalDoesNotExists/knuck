@@ -52,6 +52,57 @@ return function(K)
         return proc.pending_result
       end,
     })
+    -- /dev/null: read = EOF, write = discard
+    M.register_device("null", {
+      mode = 0x1B6,
+      read = function() return nil end,
+      write = function(data) return #data end,
+    })
+    -- /dev/zero: read = NUL bytes
+    M.register_device("zero", {
+      mode = 0x1B6,
+      read = function(n) return string.rep("\0", n or 0) end,
+      write = function(data) return #data end,
+    })
+    -- /dev/urandom: read = random bytes
+    M.register_device("urandom", {
+      mode = 0x1B6,
+      read = function(n)
+        local out = {}
+        for i = 1, (n or 1) do out[i] = string.char(math.random(0, 255)) end
+        return table.concat(out)
+      end,
+      write = function(data) return #data end,
+    })
+    -- /dev/input: raw input events (term/char/mouse), fed by the scheduler
+    M.register_device("input", {
+      mode = 0x1B6,
+      read = function(n)
+        local proc = K.sched.current()
+        K.sched.wait(proc, "input", "input")
+        return proc.pending_result
+      end,
+      write = function(data) return #data end,
+    })
+  end
+
+  -- Thin wrapper over a CC peripheral at a side. write "method arg1 arg2"
+  -- calls peripheral.call(side, method, ...). read returns nil (peripherals
+  -- are method-based, not streams).
+  local function make_periph_driver(side)
+    return {
+      mode = 0x1B6,
+      read = function() return nil end,
+      write = function(data)
+        if not peripheral then return 0 end
+        local method, rest = tostring(data):match("^(%S+)%s*(.*)$")
+        if not method then return 0 end
+        local args = {}
+        for a in (rest or ""):gmatch("%S+") do args[#args + 1] = a end
+        local ok = pcall(peripheral.call, side, method, table.unpack(args))
+        return ok and #data or 0
+      end,
+    }
   end
 
   function M.mount_root()
@@ -66,6 +117,19 @@ return function(K)
     for _, d in ipairs({ "/tmp", "/boot", "/rom" }) do
       if not fs_mod.exists(d) then fs_mod.make_dir(d) end
     end
+    -- tmpfs /tmp: wipe contents at boot (spec: "чистится при старте")
+    local function wipe(dir)
+      for _, name in ipairs(fs_mod.list(dir) or {}) do
+        local p = dir .. "/" .. name
+        if fs_mod.is_dir(p) then
+          wipe(p)
+          fs_mod.remove(p)
+        else
+          fs_mod.remove(p)
+        end
+      end
+    end
+    wipe("/tmp")
   end
 
   -- Register a device node driver
@@ -110,6 +174,10 @@ return function(K)
       p = (proc and proc.cwd or "/") .. "/" .. p
     end
     p = M.normalize(p)
+    -- chroot jail: absolute paths resolve inside proc.root (if set)
+    if proc and proc.root and proc.root ~= "/" then
+      p = M.normalize(proc.root .. p)
+    end
     -- follow symlinks (limit 40)
     for _ = 1, 40 do
       local ino = fs_mod.get_inode(p)
@@ -390,7 +458,7 @@ return function(K)
     }
   end
 
-  -- readdir a path -> list of names or nil
+  -- readdir a path -> list of {name, is_dir, ...} entries or nil
   function M.readdir(proc, path)
     local p = M.resolve(proc, path)
     local m = M.find_mount(p)
@@ -398,10 +466,25 @@ return function(K)
     local ino = M.get_inode(p)
     if not ino or ino.type ~= "dir" then return nil, "not a directory" end
     if not fs_mod.check_access(proc, ino, "r") then return nil, "permission denied" end
-    if m.fstype == "proc" then return proc_list() end
-    if m.fstype == "sys" then return sys_list(p) end
-    if m.fstype == "dev" then return dev_list() end
-    return fs_mod.list(p)
+    local names
+    if m.fstype == "proc" then names = proc_list()
+    elseif m.fstype == "sys" then names = sys_list(p)
+    elseif m.fstype == "dev" then names = dev_list()
+    else names = fs_mod.list(p) end
+    -- structured entries: {name, is_dir, type, mode, size}
+    local out = {}
+    for _, name in ipairs(names or {}) do
+      local child = M.normalize(p .. "/" .. name)
+      local cino = M.get_inode(child)
+      out[#out + 1] = {
+        name = name,
+        is_dir = (cino and cino.type == "dir") or false,
+        type = cino and cino.type or "file",
+        mode = cino and cino.mode or 0,
+        size = cino and cino.size or 0,
+      }
+    end
+    return out
   end
 
   -- open a path -> fd table or nil,err
@@ -433,6 +516,10 @@ return function(K)
     end
 
     if ino.type == "device" then
+      if ino.device:match("^periph/") then
+        local side = ino.device:match("^periph/(.+)$")
+        return { type = "device", device = ino.device, driver = make_periph_driver(side), mode = flags or "r" }
+      end
       local drv = devices[ino.device]
       if not drv then return nil, "no such device" end
       return { type = "device", device = ino.device, driver = drv, mode = flags or "r" }
@@ -477,6 +564,13 @@ return function(K)
     elseif fd.type == "device" then
       if fd.driver.read then return fd.driver.read(n) end
       return nil
+    elseif fd.type == "socket" then
+      -- POSIX: read/write on connected STREAM sockets routes to recv/send
+      local s = fd.sock
+      if s.socktype == "stream" and (s.conn or s.tcp_conn) then
+        return K.ipc.socket_recv(proc, fd, n)
+      end
+      return nil, "unsupported fd"
     end
     return nil, "unsupported fd"
   end
@@ -502,6 +596,13 @@ return function(K)
     elseif fd.type == "device" then
       if fd.driver.write then return fd.driver.write(data) end
       return nil
+    elseif fd.type == "socket" then
+      -- POSIX: write on connected STREAM sockets routes to send
+      local s = fd.sock
+      if s.socktype == "stream" and (s.conn or s.tcp_conn) then
+        return K.ipc.socket_send(proc, fd, data)
+      end
+      return nil, "unsupported fd"
     end
     return nil, "unsupported fd"
   end
@@ -671,7 +772,8 @@ return function(K)
     local t = M.normalize(target)
     local fst = fstype or "disk"
     local real = source or t
-    mounts[t] = { fstype = fst, real_root = real }
+    local ro = flags and flags:find("ro") ~= nil
+    mounts[t] = { fstype = fst, real_root = real, ro = ro }
     return true
   end
 

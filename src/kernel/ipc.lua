@@ -523,6 +523,37 @@ return function(K)
     end
   end
 
+  -- Shutdown a socket honoring how: "read" | "write" | "both"
+  function M.socket_shutdown(fd, how)
+    local s = fd.sock
+    if s.closed then return true end
+    how = how or "both"
+    if s.tcp_conn then
+      -- TCP: write = FIN (close conn), read = stop reading
+      if how == "write" or how == "both" then
+        if not s.tcp_conn.closed then K.net_transport.tcp_close(s.tcp_conn) end
+      end
+      if how == "read" or how == "both" then
+        s.closed = true
+      end
+      return true
+    end
+    if s.conn then
+      -- UNIX stream: write closes the out pipe (EOF to peer), read closes the in pipe
+      if how == "write" or how == "both" then
+        local out = (s.conn.client == s) and s.conn.to_server or s.conn.to_client
+        M.pipe_close({ type = "pipe_w", pipe = out })
+      end
+      if how == "read" or how == "both" then
+        local inp = (s.conn.client == s) and s.conn.to_client or s.conn.to_server
+        M.pipe_close({ type = "pipe_r", pipe = inp })
+      end
+      if how == "both" then s.closed = true end
+      return true
+    end
+    return M.socket_close(fd)
+  end
+
   -- Close a socket
   function M.socket_close(fd)
     local s = fd.sock

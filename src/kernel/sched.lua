@@ -203,6 +203,11 @@ return function(K)
         else
           M.wake("input", "console", ev)
         end
+        -- also feed /dev/input raw-event readers
+        M.wake("input", "input", ev)
+      elseif name == "mouse_click" or name == "mouse_scroll" then
+        -- pointer events: feed /dev/input raw-event readers only
+        M.wake("input", "input", ev)
       elseif name == "peripheral" then
         -- device hotplug: wake devctl readers
         M.wake("devctl", "devctl", ev)

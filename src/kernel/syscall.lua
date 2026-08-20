@@ -349,7 +349,20 @@ return function(K)
   M.register("fstat", function(proc, fdnum)
     local fd = proc.fds[fdnum]
     if not fd then return nil, "bad fd" end
-    return { type = fd.type, mode = 0x1A4, uid = proc.uid, gid = proc.gid, nlink = 1, size = 0 }
+    local ino = fd.path and K.vfs.get_inode(fd.path)
+    if ino then
+      return { type = ino.type, mode = ino.mode, uid = ino.uid, gid = ino.gid,
+        nlink = ino.nlink, size = ino.size or 0, path = fd.path }
+    end
+    -- fd without a path (console, pipe, device, socket)
+    local mode = 0x1B6
+    local ftype = fd.type
+    if fd.type == "pipe_r" or fd.type == "pipe_w" then
+      ftype = "fifo"
+    elseif fd.type == "file" then
+      mode = 0x1A4
+    end
+    return { type = ftype, mode = mode, uid = proc.uid, gid = proc.gid, nlink = 1, size = 0 }
   end)
 
   M.register("readdir", function(proc, path)
@@ -566,11 +579,12 @@ return function(K)
     return K.ipc.socket_recvfrom(proc, fd)
   end)
 
-  -- shutdown(fd, how)
+  -- shutdown(fd, how) — "read" | "write" | "both"
   M.register("shutdown", function(proc, fdnum, how)
     local fd = proc.fds[fdnum]
     if not fd then return nil, "bad fd" end
-    return K.ipc.socket_close(fd)
+    if not fd.sock then return nil, "not a socket" end
+    return K.ipc.socket_shutdown(fd, how)
   end)
 
   -- getsockname(fd)
@@ -616,10 +630,15 @@ return function(K)
   -- Virtual terminals (tty)
   -- ============================================================
 
-  -- ioctl(fd, request, arg): tty_switch switches the active terminal.
+  -- ioctl(fd, request, arg): tty_switch switches the active terminal;
+  -- console_mode switches /dev/console between "cooked" (lines) and "raw"
+  -- (events) input.
   M.register("ioctl", function(proc, fdnum, request, arg)
     if request == "tty_switch" then
       return K.tty.switch(arg)
+    elseif request == "console_mode" then
+      proc.console_mode = (arg == "raw") and "raw" or "cooked"
+      return true
     end
     return nil
   end)

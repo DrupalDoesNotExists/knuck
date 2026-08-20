@@ -125,8 +125,8 @@ getsockname(fd) → addr
 getpeername(fd) → addr
 setsockopt(fd, opt, val)          -- SO_REUSEADDR, SO_BROADCAST, SO_RCVTIMEO…
 getsockopt(fd, opt) → val
-select(reads?, writes?, timeout?) → n, r, w
-poll(fds, timeout?) → n           -- fds: { {fd=, events={"read","write","err"}}, ... }
+select(reads?, writes?, timeout?) → r, w, e   -- таблицы готовых fd (не счётчик)
+poll(fds, timeout?) → ready_fds               -- массив готовых fd
 ```
 
 - Сокеты — FD: `read/write/close` работают на них (POSIX).
