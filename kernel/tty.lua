@@ -70,7 +70,7 @@ return function(K)
     return {
       mode = 0x1B6,
       write = function(data)
-        local proc = K.sched.current
+        local proc = K.sched.current()
         local t = ttys[id]
         local s = tostring(data or "")
         t.buffer = t.buffer .. s
@@ -78,7 +78,7 @@ return function(K)
         return #s
       end,
       read = function(n)
-        local proc = K.sched.current
+        local proc = K.sched.current()
         K.sched.wait(proc, "tty_input", id)
         return proc.pending_result
       end,

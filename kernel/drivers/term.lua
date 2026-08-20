@@ -11,7 +11,7 @@ return function(K)
 
   -- Write data to the process's tty. Returns bytes written.
   function M.write(data)
-    local proc = K.sched.current
+    local proc = K.sched.current()
     if K.tty then
       return K.tty.write(proc, data)
     end
@@ -22,7 +22,7 @@ return function(K)
 
   -- Read from the process's tty. Blocks until input on that tty.
   function M.read(n)
-    local proc = K.sched.current
+    local proc = K.sched.current()
     if K.tty then
       return K.tty.read(proc, n)
     end

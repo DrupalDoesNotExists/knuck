@@ -30,6 +30,11 @@ return function(K)
     proc_mod = K.proc
   end
 
+  -- Currently running process (used by device drivers to resolve the caller)
+  function M.current()
+    return current
+  end
+
   -- Enqueue a ready process
   function M.enqueue(proc)
     proc.state = "ready"
@@ -104,10 +109,9 @@ return function(K)
       debug.sethook(proc.co)
     end
 
-    current = nil
-
     if not ok then
       -- Process died with an error -> SIGSEGV
+      current = nil
       proc_mod.die(proc, "SIGSEGV", req)
       return
     end
@@ -117,12 +121,16 @@ return function(K)
       proc_mod.exit(proc, 0)
     elseif type(req) == "table" then
       if req[1] == "syscall" then
+        -- Keep `current` set so syscall handlers (e.g. tty/term drivers)
+        -- can resolve the calling process via K.sched.current.
         K.syscall.handle(proc, req[2], req[3])
       elseif req[1] == "preempt" then
         -- Quantum expired: requeue
         M.enqueue(proc)
       end
     end
+
+    current = nil
   end
 
   -- Main scheduler loop. Never returns.

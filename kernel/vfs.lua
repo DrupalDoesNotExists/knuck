@@ -47,7 +47,7 @@ return function(K)
         return #s
       end,
       read = function(n)
-        local proc = K.sched.current
+        local proc = K.sched.current()
         K.sched.wait(proc, "devctl", "devctl")
         return proc.pending_result
       end,
