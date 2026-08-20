@@ -78,13 +78,6 @@ return function(K)
     K.sched.wait(proc, "timer", id)
   end)
 
-  -- write to stdout (fd 1) via term driver
-  M.register("write", function(proc, data)
-    local fd = proc.fds[1]
-    if not fd then return nil, "no stdout" end
-    return K.vfs.write(fd, data)
-  end)
-
   -- print: write args to stdout with a newline
   M.register("print", function(proc, ...)
     local parts = { ... }
@@ -151,9 +144,130 @@ return function(K)
   -- chdir
   M.register("chdir", function(proc, path)
     local resolved = K.vfs.resolve(proc, path)
-    if not K.vfs.is_dir(resolved) then return nil, "not a directory" end
+    local ino = K.vfs.get_inode(resolved)
+    if not ino or ino.type ~= "dir" then return nil, "not a directory" end
+    if not K.fs.check_access(proc, ino, "x") then return nil, "permission denied" end
     proc.cwd = resolved
     return true
+  end)
+
+  -- ============================================================
+  -- File syscalls
+  -- ============================================================
+
+  -- Allocate a new fd number for a process
+  local function alloc_fd(proc, fd)
+    for i = 3, 1024 do
+      if not proc.fds[i] then
+        proc.fds[i] = fd
+        return i
+      end
+    end
+    return nil
+  end
+
+  M.register("open", function(proc, path, flags, mode)
+    local fd, err = K.vfs.open(proc, path, flags or "r", mode)
+    if not fd then return nil, err end
+    local n = alloc_fd(proc, fd)
+    if not n then return nil, "too many open files" end
+    return n
+  end)
+
+  M.register("close", function(proc, fdnum)
+    local fd = proc.fds[fdnum]
+    if not fd then return nil, "bad fd" end
+    K.vfs.close(fd)
+    proc.fds[fdnum] = nil
+    return true
+  end)
+
+  M.register("read", function(proc, fdnum, n)
+    local fd = proc.fds[fdnum]
+    if not fd then return nil, "bad fd" end
+    return K.vfs.read(fd, n)
+  end)
+
+  M.register("write", function(proc, fdnum, data)
+    local fd = proc.fds[fdnum]
+    if not fd then return nil, "bad fd" end
+    return K.vfs.write(fd, data)
+  end)
+
+  M.register("lseek", function(proc, fdnum, offset, whence)
+    local fd = proc.fds[fdnum]
+    if not fd then return nil, "bad fd" end
+    return K.vfs.lseek(fd, offset or 0, whence or "set")
+  end)
+
+  M.register("stat", function(proc, path)
+    return K.vfs.stat(proc, path)
+  end)
+
+  M.register("fstat", function(proc, fdnum)
+    local fd = proc.fds[fdnum]
+    if not fd then return nil, "bad fd" end
+    return { type = fd.type, mode = 0x1A4, uid = proc.uid, gid = proc.gid, nlink = 1, size = 0 }
+  end)
+
+  M.register("readdir", function(proc, path)
+    return K.vfs.readdir(proc, path)
+  end)
+
+  M.register("mkdir", function(proc, path, mode)
+    return K.vfs.mkdir(proc, path, mode)
+  end)
+
+  M.register("rmdir", function(proc, path)
+    return K.vfs.rmdir(proc, path)
+  end)
+
+  M.register("unlink", function(proc, path)
+    return K.vfs.unlink(proc, path)
+  end)
+
+  M.register("rename", function(proc, old, new)
+    return K.vfs.rename(proc, old, new)
+  end)
+
+  M.register("chmod", function(proc, path, mode)
+    return K.vfs.chmod(proc, path, mode)
+  end)
+
+  M.register("chown", function(proc, path, uid, gid)
+    return K.vfs.chown(proc, path, uid, gid)
+  end)
+
+  M.register("chgrp", function(proc, path, gid)
+    return K.vfs.chown(proc, path, nil, gid)
+  end)
+
+  M.register("symlink", function(proc, target, path)
+    return K.vfs.symlink(proc, target, path)
+  end)
+
+  M.register("readlink", function(proc, path)
+    return K.vfs.readlink(proc, path)
+  end)
+
+  M.register("link", function(proc, old, new)
+    return K.vfs.link(proc, old, new)
+  end)
+
+  M.register("chroot", function(proc, path)
+    return K.vfs.chroot(proc, path)
+  end)
+
+  M.register("mount", function(proc, source, target, fstype, flags)
+    return K.vfs.mount(proc, source, target, fstype, flags)
+  end)
+
+  M.register("umount", function(proc, target)
+    return K.vfs.umount(proc, target)
+  end)
+
+  M.register("umask", function(proc, mask)
+    return K.vfs.umask(proc, mask)
   end)
 
   return M

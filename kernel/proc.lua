@@ -79,6 +79,8 @@ return function(K)
       pgid = pid,
       priority = 0,
       cwd = "/",
+      root = "/",
+      umask = 0x12,  -- 0022 octal
       state = "ready",
       env = env,
       fds = { [0] = { type = "console", mode = "r" }, [1] = { type = "console", mode = "w" }, [2] = { type = "console", mode = "w" } },

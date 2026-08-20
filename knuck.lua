@@ -38,6 +38,7 @@ K.selfcheck = diag.run(K)
 K.sched = K.loader.load("/knuck/kernel/sched.lua", K)
 K.syscall = K.loader.load("/knuck/kernel/syscall.lua", K)
 K.proc = K.loader.load("/knuck/kernel/proc.lua", K)
+K.fs = K.loader.load("/knuck/kernel/fs.lua", K)
 K.vfs = K.loader.load("/knuck/kernel/vfs.lua", K)
 
 -- 4. Init modules (dependency order)
