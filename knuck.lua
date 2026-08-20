@@ -81,25 +81,52 @@ function K.term_write(s)
       has_nl = false
       pos = #text + 1
     end
-    -- write seg with wrapping
+    -- write seg with wrapping + backspace handling
     local cx, cy = t.getCursorPos()
     local col = cx or 1
-    local i = 1
-    while i <= #seg do
-      local avail = w - col + 1
-      if avail < 1 then avail = 1 end
-      local chunk = seg:sub(i, i + avail - 1)
-      t.write(chunk)
-      i = i + #chunk
-      col = col + #chunk
-      if col > w then
-        cy = cy + 1
-        if cy > h then
-          t.scroll(1)
-          cy = h
+    if seg:find("\b", 1, true) then
+      -- char-by-char (backspace present): \b moves cursor back and erases
+      for i = 1, #seg do
+        local ch = seg:sub(i, i)
+        if ch == "\b" then
+          col = col - 1
+          if col < 1 then col = 1 end
+          t.setCursorPos(col, cy)
+          t.write(" ")
+          t.setCursorPos(col, cy)
+        else
+          t.write(ch)
+          col = col + 1
+          if col > w then
+            cy = cy + 1
+            if cy > h then
+              t.scroll(1)
+              cy = h
+            end
+            t.setCursorPos(1, cy)
+            col = 1
+          end
         end
-        t.setCursorPos(1, cy)
-        col = 1
+      end
+    else
+      -- chunked fast path
+      local i = 1
+      while i <= #seg do
+        local avail = w - col + 1
+        if avail < 1 then avail = 1 end
+        local chunk = seg:sub(i, i + avail - 1)
+        t.write(chunk)
+        i = i + #chunk
+        col = col + #chunk
+        if col > w then
+          cy = cy + 1
+          if cy > h then
+            t.scroll(1)
+            cy = h
+          end
+          t.setCursorPos(1, cy)
+          col = 1
+        end
       end
     end
     -- advance line only on an actual newline
