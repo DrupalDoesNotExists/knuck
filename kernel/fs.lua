@@ -93,7 +93,7 @@ return function(K)
   -- Apply umask to a requested mode
   function M.apply_umask(proc, mode)
     local um = proc.umask or 0x12  -- 0022 octal
-    return mode & ~um & 0x1FF
+    return K.bit.band(K.bit.band(mode, K.bit.bnot(um)), 0x1FF)
   end
 
   -- ---- real-fs operations ----

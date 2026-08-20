@@ -565,7 +565,7 @@ return function(K)
     local ino = M.get_inode(p)
     if not ino then return nil, "no such file" end
     if proc.uid ~= 0 and proc.uid ~= ino.uid then return nil, "permission denied" end
-    ino.mode = mode & 0xFFF
+    ino.mode = K.bit.band(mode, 0xFFF)
     return true
   end
 
@@ -651,7 +651,7 @@ return function(K)
   -- umask
   function M.umask(proc, mask)
     local old = proc.umask or 0x1B2
-    if mask then proc.umask = mask & 0x1FF end
+    if mask then proc.umask = K.bit.band(mask, 0x1FF) end
     return old
   end
 

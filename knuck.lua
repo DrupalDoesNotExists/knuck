@@ -19,6 +19,30 @@ local K = {
   selfcheck = {},
 }
 
+-- Bit helpers (CraftOS 1.9 = Lua 5.2/Cobalt: no bitwise operators, no bit32)
+K.bit = {
+  band = function(a, b)
+    local r, bit = 0, 1
+    while a > 0 and b > 0 do
+      if a % 2 == 1 and b % 2 == 1 then r = r + bit end
+      a = math.floor(a / 2); b = math.floor(b / 2); bit = bit * 2
+    end
+    return r
+  end,
+  bor = function(a, b)
+    local r, bit = 0, 1
+    while a > 0 or b > 0 do
+      if a % 2 == 1 or b % 2 == 1 then r = r + bit end
+      a = math.floor(a / 2); b = math.floor(b / 2); bit = bit * 2
+    end
+    return r
+  end,
+  bnot = function(a)
+    -- 32-bit complement
+    return 0xFFFFFFFF - a
+  end,
+}
+
 -- Kernel log (writes to stderr/console)
 function K.log(msg)
   term.setTextColor(colors.yellow)

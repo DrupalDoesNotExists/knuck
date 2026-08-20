@@ -334,8 +334,8 @@ return function(K)
         local n = spec.fd
         local fd = proc.fds[n]
         local events = 0
-        if fd and K.ipc.fd_readable(fd) then events = events | 1 end  -- POLLIN
-        if fd and K.ipc.fd_writable(fd) then events = events | 4 end  -- POLLOUT
+        if fd and K.ipc.fd_readable(fd) then events = K.bit.bor(events, 1) end  -- POLLIN
+        if fd and K.ipc.fd_writable(fd) then events = K.bit.bor(events, 4) end  -- POLLOUT
         if events ~= 0 then ready[#ready + 1] = { fd = n, revents = events } end
       end
     end
