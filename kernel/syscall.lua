@@ -38,15 +38,18 @@ return function(K)
       proc_mod.die(proc, "SIGSYS", "unknown syscall: " .. tostring(name))
       return
     end
-    local ok, res = pcall(handler, proc, unpack(args or {}))
+    -- Capture all handler return values into a table (pcall keeps only the
+    -- first, so wrap). The process wrapper unpacks this table.
+    local results = { pcall(handler, proc, table.unpack(args or {})) }
+    local ok = table.remove(results, 1)
     if not ok then
-      proc_mod.die(proc, "SIGSYS", name .. ": " .. tostring(res))
+      proc_mod.die(proc, "SIGSYS", name .. ": " .. tostring(results[1]))
       return
     end
     -- If the handler blocked the process, it is now "waiting"; do not resume.
-    -- Otherwise resume with the handler's result.
+    -- Otherwise resume with the handler's results.
     if proc.state == "running" then
-      K.sched.resume(proc, res)
+      K.sched.resume(proc, results)
     end
   end
 
@@ -80,6 +83,16 @@ return function(K)
     local fd = proc.fds[1]
     if not fd then return nil, "no stdout" end
     return K.vfs.write(fd, data)
+  end)
+
+  -- print: write args to stdout with a newline
+  M.register("print", function(proc, ...)
+    local parts = { ... }
+    for i, v in ipairs(parts) do parts[i] = tostring(v) end
+    local line = table.concat(parts, "\t") .. "\n"
+    local fd = proc.fds[1]
+    if not fd then return nil, "no stdout" end
+    return K.vfs.write(fd, line)
   end)
 
   -- spawn a child process

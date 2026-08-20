@@ -14,6 +14,8 @@ local M = {}
 local loaded = {}
 
 -- Load a module file. `K` is the kernel namespace (has .env = kernel env).
+-- Module files return `function(K) ... return M end`. We execute the chunk
+-- to get that function, then call it with K to get the module's exports.
 -- Returns the module's exports (cached).
 function M.load(path, K)
   if loaded[path] then return loaded[path] end
@@ -21,7 +23,8 @@ function M.load(path, K)
   if not f then
     error("load " .. path .. ": " .. tostring(err))
   end
-  local mod = f(K)
+  local modfn = f()
+  local mod = modfn(K)
   loaded[path] = mod
   return mod
 end

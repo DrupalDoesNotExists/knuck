@@ -32,15 +32,21 @@ return function(K)
     -- basic functions
     for _, f in ipairs({ "type", "tostring", "pairs", "ipairs", "select",
       "error", "pcall", "xpcall", "next", "rawget", "rawset",
-      "setmetatable", "getmetatable", "unpack" }) do
+      "setmetatable", "getmetatable" }) do
       env[f] = _G[f]
     end
+    -- unpack: Lua 5.2+ has no global unpack (it is table.unpack)
+    env.unpack = table.unpack
     -- syscall wrappers: each yields {"syscall", name, args}
     for _, name in ipairs(K.syscall.names()) do
       env[name] = function(...)
         local args = { ... }
         local res = coroutine.yield({ "syscall", name, args })
-        return unpack(res or {})
+        if type(res) == "table" then
+          return table.unpack(res)
+        else
+          return res
+        end
       end
     end
     return env
@@ -83,7 +89,7 @@ return function(K)
 
     -- Create the coroutine; pass args
     proc.co = coroutine.create(function()
-      return fn(unpack(args or {}))
+      return fn(table.unpack(args or {}))
     end)
 
     processes[pid] = proc
@@ -171,15 +177,16 @@ return function(K)
 
   -- Notify parent (SIGCHLD) and wake a waiting waitpid
   function M.notify_parent(proc)
+    local reap = { proc.pid, proc.exitstatus[1], proc.exitstatus[2] }
     local parent = processes[proc.ppid]
     if parent then
-      K.sched.wake("child", proc.ppid, true)
+      K.sched.wake("child", proc.ppid, reap)
     else
       -- orphan: adopt by init
       if init_pid and processes[init_pid] then
         processes[init_pid].children[proc.pid] = proc
         proc.ppid = init_pid
-        K.sched.wake("child", init_pid, true)
+        K.sched.wake("child", init_pid, reap)
       end
     end
   end

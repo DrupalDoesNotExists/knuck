@@ -19,6 +19,13 @@ local K = {
   selfcheck = {},
 }
 
+-- Kernel log (writes to stderr/console)
+function K.log(msg)
+  term.setTextColor(colors.yellow)
+  term.write("[k] " .. tostring(msg) .. "\n")
+  term.setTextColor(colors.white)
+end
+
 -- 1. Loader
 K.loader = loadfile("/knuck/kernel/loader.lua", "t", K.env)()
 
@@ -57,5 +64,14 @@ if not K.selfcheck.collectgarbage then
   print("  memory: soft mode (no collectgarbage)")
 end
 
--- 7. Start scheduler (never returns)
+-- 7. Spawn init (pid 1)
+local init_pid = K.proc.spawn("/knuck/sbin/init.lua", 0, 0, 0, {})
+if init_pid then
+  K.proc.set_init(init_pid)
+  print("  init pid " .. init_pid)
+else
+  print("  ERROR: failed to spawn init")
+end
+
+-- 8. Start scheduler (never returns)
 K.sched.start()
