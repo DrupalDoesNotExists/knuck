@@ -26,28 +26,41 @@ end
 -- The read syscall returns the wake result UNPACKED: a console read yields
 -- ("char", "x") or ("key", 28); a file read yields a plain string. Capture
 -- all return values and interpret them.
+-- When `echo` is true (interactive console), typed chars are written back
+-- to the console so the user sees what they type.
 local ENTER_KEY_CC = 28        -- CC 1.9
 local ENTER_KEY_TW = 257       -- CC:Tweaked
 local BS_KEY_CC = 14           -- CC 1.9
 local BS_KEY_TW = 259          -- CC:Tweaked
 
-local function readline(fd)
+local function readline(fd, echo)
   local buf = ""
   while true do
     local vals = { read(fd, 1) }
     local v = vals[1]
     if v == "char" then
       local c = vals[2]
-      if c == "\n" then return buf end
+      if c == "\n" then
+        if echo then write("\n") end
+        return buf
+      end
       if c == "\b" then
+        if echo then write("\b \b") end
         buf = buf:sub(1, -2)
       elseif c ~= "\r" then
+        if echo then write(c) end
         buf = buf .. c
       end
     elseif v == "key" then
       local code = vals[2]
-      if code == ENTER_KEY_CC or code == ENTER_KEY_TW then return buf end
-      if code == BS_KEY_CC or code == BS_KEY_TW then buf = buf:sub(1, -2) end
+      if code == ENTER_KEY_CC or code == ENTER_KEY_TW then
+        if echo then write("\n") end
+        return buf
+      end
+      if code == BS_KEY_CC or code == BS_KEY_TW then
+        if echo then write("\b \b") end
+        buf = buf:sub(1, -2)
+      end
     elseif v == nil then
       -- EOF / closed console
       if buf == "" then return nil end
@@ -185,12 +198,15 @@ end
 
 clear()
 print("KNUCK sh - type 'help' for builtins, 'exit' to quit")
+print("SHELL READY")  -- diag: any output after clear() must render below banner
 while true do
   print("sh# ")
-  local line = readline(console)
+  local line = readline(console, true)
   if not line then break end
   local ok, err = pcall(run_line, line)
   if not ok then print("sh: " .. tostring(err)) end
 end
+-- diag: if console reads EOF immediately this line appears right away
+print("sh: console closed")
 close(console)
 exit(0)
