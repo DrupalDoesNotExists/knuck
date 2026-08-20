@@ -14,30 +14,31 @@
 local BASE = "https://raw.githubusercontent.com/DrupalDoesNotExists/knuck/main"
 local DEST = "/knuck"
 
--- Files to install (relative to repo root, written under DEST)
+-- Files to install: { repo_path, rootfs_path } (written under DEST).
+-- Repo is source-organized; rootfs keeps kernel//sbin/ layout.
 local FILES = {
-  "knuck.lua",
-  "kernel/loader.lua",
-  "kernel/diag.lua",
-  "kernel/sched.lua",
-  "kernel/syscall.lua",
-  "kernel/proc.lua",
-  "kernel/fs.lua",
-  "kernel/vfs.lua",
-  "kernel/ipc.lua",
-  "kernel/net.lua",
-  "kernel/net_transport.lua",
-  "kernel/auth.lua",
-  "kernel/tty.lua",
-  "kernel/drivers/term.lua",
-  "sbin/init.lua",
-  "sbin/hello.lua",
-  "sbin/ipc_child.lua",
-  "sbin/sh.lua",
-  "sbin/useradd.lua",
-  "sbin/groupadd.lua",
-  "sbin/deluser.lua",
-  "tests/vfs_ipc_test.lua",
+  { "boot.lua", "knuck.lua" },
+  { "src/kernel/loader.lua", "kernel/loader.lua" },
+  { "src/kernel/diag.lua", "kernel/diag.lua" },
+  { "src/kernel/sched.lua", "kernel/sched.lua" },
+  { "src/kernel/syscall.lua", "kernel/syscall.lua" },
+  { "src/kernel/proc.lua", "kernel/proc.lua" },
+  { "src/kernel/fs.lua", "kernel/fs.lua" },
+  { "src/kernel/vfs.lua", "kernel/vfs.lua" },
+  { "src/kernel/ipc.lua", "kernel/ipc.lua" },
+  { "src/kernel/net.lua", "kernel/net.lua" },
+  { "src/kernel/net_transport.lua", "kernel/net_transport.lua" },
+  { "src/kernel/auth.lua", "kernel/auth.lua" },
+  { "src/kernel/tty.lua", "kernel/tty.lua" },
+  { "src/kernel/drivers/term.lua", "kernel/drivers/term.lua" },
+  { "src/userspace/init.lua", "sbin/init.lua" },
+  { "src/userspace/hello.lua", "sbin/hello.lua" },
+  { "src/userspace/ipc_child.lua", "sbin/ipc_child.lua" },
+  { "src/userspace/sh.lua", "sbin/sh.lua" },
+  { "src/userspace/useradd.lua", "sbin/useradd.lua" },
+  { "src/userspace/groupadd.lua", "sbin/groupadd.lua" },
+  { "src/userspace/deluser.lua", "sbin/deluser.lua" },
+  { "tests/vfs_ipc_test.lua", "tests/vfs_ipc_test.lua" },
 }
 
 local function ensure_dir(path)
@@ -70,12 +71,13 @@ print("Target: " .. DEST)
 print("")
 
 local total = 0
-for _, f in ipairs(FILES) do
-  local url = BASE .. "/" .. f
-  local dest = DEST .. "/" .. f
+for _, pair in ipairs(FILES) do
+  local src, dst = pair[1], pair[2]
+  local url = BASE .. "/" .. src
+  local dest = DEST .. "/" .. dst
   local n = download(url, dest)
   total = total + n
-  print("  " .. f .. " (" .. n .. " bytes)")
+  print("  " .. dst .. " (" .. n .. " bytes)")
 end
 
 print("")
