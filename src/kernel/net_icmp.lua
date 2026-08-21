@@ -5,8 +5,9 @@
   RFC 792). Replaces the hardcoded _icmp_handle in net.lua.
 
   Provides:
-    - Protocol handler registered via K.net.register_proto(1, handler)
-    - AF_ICMP socket domain for userland ping/traceroute
+    - Protocol handler registered via K.net.register_proto(IPPROTO_ICMP, handler)
+    - AF_MODEM4 socket domain with IPPROTO_ICMP for userland ping/traceroute
+      (AF_ICMP is a deprecated alias for AF_MODEM4 + IPPROTO_ICMP)
     - Per-socket receive queues with blocking recv
     - ICMP statistics (sent/received/errors)
 
@@ -16,11 +17,14 @@
     11 time exceeded
     8  echo request (handled by kernel, also forwarded to sockets)
 
-  Socket model:
-    socket("icmp", "dgram", 1)  -- AF_ICMP, SOCK_DGRAM, IPPROTO_ICMP
-    bind(fd, "0.0.0.0")        -- optional, binds to filter
-    sendto(fd, data, dest_ip)   -- sends ICMP with auto-ident/seq
-    recvfrom(fd)                -- blocks until ICMP packet arrives
+  Socket model (new):
+    socket("modem4", "raw", 1)   -- AF_MODEM4, SOCK_RAW, IPPROTO_ICMP
+    bind(fd, "0.0.0.0")          -- optional, binds to filter
+    sendto(fd, data, dest_ip)    -- sends ICMP with auto-ident/seq
+    recvfrom(fd)                 -- blocks until ICMP packet arrives
+
+  Deprecated socket model (compat):
+    socket("icmp", "dgram", 1)   -- AF_ICMP (deprecated), SOCK_DGRAM, IPPROTO_ICMP
 ]]
 
 return function(K)
@@ -90,7 +94,7 @@ return function(K)
       local reply_payload = data:sub(9)  -- everything after 8-byte ICMP header
       local reply_rest = data:sub(5, 8)  -- ident + sequence
       local reply = build_icmp(ICMP_ECHO_REPLY, 0, reply_rest, reply_payload)
-      net.send_ip(src_ip, 1, reply)
+      net.send_ip(src_ip, net.IPPROTO_ICMP, reply)
       stats.sent = stats.sent + 1
     elseif typ == ICMP_ECHO_REPLY then
       stats.echo_replies = stats.echo_replies + 1
@@ -174,7 +178,7 @@ return function(K)
       .. string.char(math.floor(cs / 256), cs % 256)
       .. data:sub(5)
 
-    local ok, err = net.send_ip(dest_ip, 1, packet)
+    local ok, err = net.send_ip(dest_ip, net.IPPROTO_ICMP, packet)
     if ok then
       stats.sent = stats.sent + 1
       return #data
@@ -194,7 +198,7 @@ return function(K)
       .. string.char(math.floor(cs / 256), cs % 256)
       .. data:sub(5)
 
-    local ok, err = net.send_ip(dest_ip, 1, packet)
+    local ok, err = net.send_ip(dest_ip, net.IPPROTO_ICMP, packet)
     if ok then
       stats.sent = stats.sent + 1
       return #data
@@ -261,8 +265,8 @@ return function(K)
   function M.init()
     net = K.net
     -- Register ICMP protocol handler
-    net.register_proto(1, M.handle)
-    K.log("net_icmp: loaded, ICMP protocol handler registered")
+    net.register_proto(net.IPPROTO_ICMP, M.handle)
+    K.log("net_icmp: loaded, ICMP protocol handler registered (proto=" .. net.IPPROTO_ICMP .. ")")
   end
 
   return M

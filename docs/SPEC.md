@@ -13,7 +13,7 @@
 - **Драйверы**: единственные, кто трогает железо. Даже вывод на экран — сисколл →
   ядро → драйвер `term`. Драйверы регистрируют device-ноды в VFS.
 - **Юзер-спейс**: только сисколлы. Прямого доступа к железу нет.
-- **Единый socket-API**: одно API на все семейства (AF_UNIX/AF_MODEM/AF_HTTP),
+- **Единый socket-API**: одно API на все семейства (AF_UNIX/AF_MODEM4/AF_MODEM6/AF_HTTP),
   домен выбирает транспорт, поверхность общая (как в Linux).
 - **Политика — в юзер-спейсе, механизм — в ядре** (DHCP, монтирование, man — юзер-спейс;
   ARP, планировщик, VFS — ядро).
@@ -114,7 +114,7 @@ chgrp(path, gid)
 ```
 pipe() → rfd, wfd                 -- анонимный пайп
 mkfifo(path, mode)                -- именованный пайп
-socket(domain, type, proto) → fd  -- AF_UNIX|AF_MODEM|AF_HTTP × STREAM|DGRAM
+socket(domain, type, proto) → fd  -- AF_UNIX|AF_MODEM4|AF_MODEM6|AF_HTTP × STREAM|DGRAM|RAW
 bind(fd, addr)                    -- inet: {ip=, port=}; unix: {path=}; http: {host=, port=} [CUT: http — только connect]
 listen(fd, backlog)
 accept(fd) → fd                   -- блокирующий
@@ -131,9 +131,38 @@ select(reads?, writes?, timeout?) → r, w, e   -- таблицы готовых
 poll(fds, timeout?) → ready_fds               -- массив готовых fd
 ```
 
+**Address families (AF_*)** — числовые константы, доступны из юзер-спейса:
+```
+AF_UNIX   = 1    -- локальные (UNIX domain) сокеты
+AF_MODEM4 = 2    -- IPv4 поверх CC-модема (основной сетевой домен)
+AF_INET   = 2    -- алиас для AF_MODEM4
+AF_ICMP   = 2    -- УСТАРЕЛ: алиас для AF_MODEM4 (используйте AF_MODEM4 + IPPROTO_ICMP)
+AF_HTTP   = 3    -- HTTP поверх CraftOS http API
+AF_MODEM6 = 10   -- IPv6 поверх CC-модема (зарезервирован, не реализован)
+AF_INET6  = 10   -- алиас для AF_MODEM6
+```
+
+**Socket types (SOCK_*)**:
+```
+SOCK_STREAM = 1  -- потоковый (TCP для AF_MODEM4)
+SOCK_DGRAM  = 2  -- датаграммный (UDP для AF_MODEM4)
+SOCK_RAW    = 3  -- сырой (ICMP для AF_MODEM4)
+```
+
+**IP protocol numbers (IPPROTO_*)**:
+```
+IPPROTO_IP   = 0   -- IP (не указывать явно)
+IPPROTO_ICMP = 1   -- ICMP (ping, traceroute)
+IPPROTO_TCP  = 6   -- TCP
+IPPROTO_UDP  = 17  -- UDP
+```
+
 - Сокеты — FD: `read/write/close` работают на них (POSIX).
 - AF_HTTP — HTTP-запросы (GET/POST/заголовки) через единый socket-API, обёртка над CC `http`.
   WebSocket — нет.
+- ICMP raw: `socket("modem4", "raw", 1)` (AF_MODEM4 + SOCK_RAW + IPPROTO_ICMP).
+  Deprecated: `socket("icmp", "dgram", 1)` — работает как алиас, логирует предупреждение.
+- Константы AF_*/SOCK_*/IPPROTO_* доступны в песочнике процесса как глобальные переменные.
 
 ### 5.4 vfs
 
@@ -198,10 +227,12 @@ rmmod(name) → ok                  -- выгрузить
 
 - **Ethernet** (литеральные фреймы): dest(6)+src(6)+ethertype(2)+payload+FCS(4).
   MAC — локально-администрируемый `02:00:00:00:xx:xx` из modem-id. FCS считается и проверяется.
-- **IP** (RFC 791): фрагментация и сборка.
+- **IP** (RFC 791): фрагментация и сборка. Протоколы: IPPROTO_ICMP=1, IPPROTO_TCP=6, IPPROTO_UDP=17.
+- **ICMP** (RFC 792): модуль `net_icmp.lua`. Сокет: `socket("modem4", "raw", IPPROTO_ICMP)`.
+  Deprecated: `socket("icmp", "dgram", IPPROTO_ICMP)` — алиас для обратной совместимости.
 - **ARP** (RFC 826): в ядре, на каждом узле. Кэш `IP→MAC` с таймаутом, статические записи.
 - **TCP** (RFC 793) / **UDP** (RFC 768): литеральные протоколы.
-- Маршрутизация: статические маршруты + default gw через `/sys/net`.
+- Маршрутизация: статические маршруты + default gw через `/sys/net`. Маршруты привязаны к address family (AF_MODEM4/AF_MODEM6).
 - DHCP — юзер-спейс (ядро даёт UDP + broadcast; демон прописывает IP через `/sys/net`).
 - Конфигурация сети — через `/sys/net` (не отдельный сисколл).
 

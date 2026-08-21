@@ -649,6 +649,10 @@ return function(K)
   end)
 
   -- socket(domain, type, proto) -> fd
+  -- Domains: AF_MODEM4(2)|AF_MODEM6(10)|AF_UNIX(1)|AF_HTTP(3); deprecated: AF_ICMP(2)=AF_MODEM4
+  -- Types:   SOCK_STREAM(1)|SOCK_DGRAM(2)|SOCK_RAW(3)
+  -- Proto:   IPPROTO_ICMP(1)|IPPROTO_TCP(6)|IPPROTO_UDP(17)|0
+  -- ICMP raw: socket("modem4", "raw", 1) or deprecated socket("icmp", "dgram", 1)
   M.register("socket", function(proc, domain, socktype, proto)
     local fd = K.ipc.socket(domain, socktype, proto)
     local n = alloc_fd(proc, fd)
@@ -706,14 +710,14 @@ return function(K)
     return K.ipc.socket_recv(proc, fd, n, flags)
   end)
 
-  -- sendto(fd, data, dest_ip, dest_port)  (AF_MODEM)
+  -- sendto(fd, data, dest_ip, dest_port)  (AF_MODEM4/AF_MODEM6)
   M.register("sendto", function(proc, fdnum, data, dest_ip, dest_port)
     local fd = proc.fds[fdnum]
     if not fd then return nil, "bad fd" end
     return K.ipc.socket_sendto(proc, fd, data, dest_ip, dest_port)
   end)
 
-  -- recvfrom(fd) -> data, src_ip, src_port  (AF_MODEM)
+  -- recvfrom(fd) -> data, src_ip, src_port  (AF_MODEM4/AF_MODEM6)
   M.register("recvfrom", function(proc, fdnum)
     local fd = proc.fds[fdnum]
     if not fd then return nil, "bad fd" end

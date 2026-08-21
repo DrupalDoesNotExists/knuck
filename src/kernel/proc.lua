@@ -78,6 +78,21 @@ return function(K)
       HUP = 1, INT = 2, QUIT = 3, KILL = 9, USR1 = 10, USR2 = 12,
       PIPE = 13, ALRM = 14, TERM = 15, CHLD = 17, CONT = 18, STOP = 19,
     }
+    -- network address family / protocol constants for userspace
+    env.AF_UNIX   = 1
+    env.AF_MODEM4 = 2     -- IPv4 over modem link
+    env.AF_INET   = 2     -- alias for AF_MODEM4
+    env.AF_ICMP   = 2     -- DEPRECATED: alias for AF_MODEM4
+    env.AF_HTTP   = 3
+    env.AF_MODEM6 = 10    -- IPv6 over modem link (reserved)
+    env.AF_INET6  = 10    -- alias for AF_MODEM6
+    env.SOCK_STREAM = 1
+    env.SOCK_DGRAM  = 2
+    env.SOCK_RAW    = 3
+    env.IPPROTO_IP   = 0
+    env.IPPROTO_ICMP = 1
+    env.IPPROTO_TCP  = 6
+    env.IPPROTO_UDP  = 17
     if system then
       -- Full env for system processes (pine.lua, hook scripts): grant
       -- load/loadfile/dofile/io/os/require so they can load and run

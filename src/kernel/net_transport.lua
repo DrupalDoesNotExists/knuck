@@ -4,8 +4,11 @@
   UDP + TCP (RFC 793) over the net.lua link/IP layer.
 
   Registers protocol handlers with K.net:
-    K.net.register_proto(6,  tcp_handle)   -- TCP
-    K.net.register_proto(17, udp_handle)   -- UDP
+    K.net.register_proto(IPPROTO_TCP,  tcp_handle)   -- 6
+    K.net.register_proto(IPPROTO_UDP,  udp_handle)   -- 17
+
+  IP protocol constants (from net.lua):
+    IPPROTO_ICMP = 1,  IPPROTO_TCP = 6,  IPPROTO_UDP = 17
 
   UDP: port table with per-port receive queues. sendto/recvfrom semantics.
   TCP: full state machine (CLOSED/LISTEN/SYN_SENT/SYN_RECEIVED/ESTABLISHED/
@@ -56,7 +59,7 @@ return function(K)
       math.floor(src_port / 256), src_port % 256,
       math.floor(dest_port / 256), dest_port % 256,
       math.floor(len / 256), len % 256, 0, 0)  -- checksum 0 (optional)
-    return K.net.send_ip(dest_ip, 17, header .. data)
+    return K.net.send_ip(dest_ip, K.net.IPPROTO_UDP, header .. data)
   end
 
   -- Blocking receive from a bound UDP port. Returns data, src_ip, src_port.
@@ -143,7 +146,7 @@ return function(K)
   local function tcp_checksum(src_ip, dest_ip, payload)
     -- pseudo-header + TCP segment
     local len = #payload
-    local pseudo = src_ip .. dest_ip .. string.char(0, 6,
+    local pseudo = src_ip .. dest_ip .. string.char(0, K.net.IPPROTO_TCP,
       math.floor(len / 256), len % 256)
     local seg = pseudo .. payload
     local sum = 0
@@ -180,7 +183,7 @@ return function(K)
   -- Send a TCP segment via the IP layer.
   local function send_segment(conn, flags, seq, ack, data)
     local seg = build_tcp(conn, flags, seq, ack, data)
-    K.net.send_ip(conn.remote_ip, 6, seg)
+    K.net.send_ip(conn.remote_ip, K.net.IPPROTO_TCP, seg)
   end
 
   -- Schedule a retransmit timer for a connection.
@@ -528,8 +531,8 @@ return function(K)
 
   function M.init()
     net = K.net
-    net.register_proto(6, M.tcp_handle)
-    net.register_proto(17, M.udp_handle)
+    net.register_proto(net.IPPROTO_TCP, M.tcp_handle)
+    net.register_proto(net.IPPROTO_UDP, M.udp_handle)
   end
 
   return M

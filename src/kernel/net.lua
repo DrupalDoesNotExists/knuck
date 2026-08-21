@@ -18,6 +18,18 @@
   Ethertypes: 0x0800 = IPv4, 0x0806 = ARP.
   IP protocols: 1 = ICMP, 6 = TCP, 17 = UDP (TCP/UDP live in net_transport).
 
+  Address families:
+    AF_UNIX   = 1   -- local (UNIX domain sockets, ipc.lua)
+    AF_MODEM4 = 2   -- IPv4 over modem link
+    AF_INET   = 2   -- alias for AF_MODEM4
+    AF_ICMP   = 2   -- DEPRECATED: alias for AF_MODEM4 (use AF_MODEM4 + IPPROTO_ICMP)
+    AF_HTTP   = 3   -- HTTP over CraftOS http API
+    AF_MODEM6 = 10  -- IPv6 over modem link (reserved, not yet implemented)
+    AF_INET6  = 10  -- alias for AF_MODEM6
+
+  IP protocol numbers (IPPROTO):
+    IPPROTO_ICMP = 1,  IPPROTO_TCP = 6,  IPPROTO_UDP = 17
+
   Lua 5.2/Cobalt has no bit32 library: bit ops are done with arithmetic.
 ]]
 
@@ -60,6 +72,25 @@ return function(K)
   local function bshr(a, n) return math.floor(a / (2 ^ n)) end
   M.bxor = bxor
 
+  -- ---- constants (exposed to userspace via proc.lua) ----
+
+  M.AF_UNIX   = 1     -- UNIX domain sockets
+  M.AF_MODEM4 = 2     -- IPv4 over modem link
+  M.AF_INET   = 2     -- alias for AF_MODEM4
+  M.AF_ICMP   = 2     -- DEPRECATED: alias for AF_MODEM4
+  M.AF_HTTP   = 3     -- HTTP over CraftOS http API
+  M.AF_MODEM6 = 10    -- IPv6 over modem link (reserved)
+  M.AF_INET6  = 10    -- alias for AF_MODEM6
+
+  M.SOCK_STREAM = 1
+  M.SOCK_DGRAM  = 2
+  M.SOCK_RAW    = 3
+
+  M.IPPROTO_IP   = 0
+  M.IPPROTO_ICMP = 1
+  M.IPPROTO_TCP  = 6
+  M.IPPROTO_UDP  = 17
+
   -- ---- state ----
 
   M.enabled = false
@@ -67,6 +98,7 @@ return function(K)
   M.side = nil
   M.mac = nil
   M.channel = 0
+  M.family = M.AF_MODEM4               -- active address family (AF_MODEM4|AF_MODEM6)
   M.ip = string.char(0, 0, 0, 0)          -- 4-byte string
   M.netmask = string.char(255, 255, 255, 0)
   M.gateway = string.char(0, 0, 0, 0)
@@ -77,7 +109,7 @@ return function(K)
   M.timers = {}                           -- timer_id -> action
   M.rx_queue = {}                         -- raw frames for /dev/modemN
   M.ip_id = 1
-  M.routes = {}                           -- { dest=ip4, mask=ip4, gw=ip4, metric=int }
+  M.routes = {}                           -- { dest=ip4, mask=ip4, gw=ip4, metric=int, family=int }
 
   -- ---- helpers ----
 
@@ -480,9 +512,9 @@ return function(K)
     K.log("net: enabled on " .. tostring(M.side) .. " mac " .. M.mac_to_str(M.mac))
     -- Seed routing table: default route via gateway + directly-connected subnet
     if M.gateway ~= string.char(0, 0, 0, 0) then
-      M.routes[1] = { dest = string.char(0, 0, 0, 0), mask = string.char(0, 0, 0, 0), gw = M.gateway, metric = 0 }
+      M.routes[1] = { dest = string.char(0, 0, 0, 0), mask = string.char(0, 0, 0, 0), gw = M.gateway, metric = 0, family = M.AF_MODEM4 }
     end
-    M.routes[#M.routes + 1] = { dest = ip_band(M.ip, M.netmask), mask = M.netmask, gw = string.char(0, 0, 0, 0), metric = 0 }
+    M.routes[#M.routes + 1] = { dest = ip_band(M.ip, M.netmask), mask = M.netmask, gw = string.char(0, 0, 0, 0), metric = 0, family = M.AF_MODEM4 }
     -- /dev/modemN: thin wrapper over the same link layer (root-only, 0600)
     K.vfs.register_device("modem0", {
       mode = 0x180,

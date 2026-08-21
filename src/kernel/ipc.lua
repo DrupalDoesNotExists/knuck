@@ -1,8 +1,17 @@
 --[[
   KNUCK IPC layer
   ===============
-  Pipes, FIFOs, and sockets (AF_UNIX, AF_MODEM, AF_HTTP) with a unified
-  socket(domain, type, proto) API.
+  Pipes, FIFOs, and sockets (AF_UNIX, AF_MODEM4/AF_MODEM6, AF_HTTP) with a
+  unified socket(domain, type, proto) API.
+
+  Address families:
+    AF_MODEM4 = 2  -- IPv4 over modem (primary modem domain)
+    AF_MODEM6 = 10 -- IPv6 over modem (reserved)
+    AF_ICMP   = 2  -- DEPRECATED: use AF_MODEM4 + IPPROTO_ICMP instead
+    AF_HTTP   = 3  -- HTTP over CraftOS http API
+    AF_UNIX   = 1  -- local UNIX domain sockets
+
+  ICMP sockets: socket("modem4", "raw", 1) or deprecated socket("icmp", "dgram", 1)
 
   Blocking model: processes block via K.sched.wait(reason, key). Pipe and
   socket activity wakes them via K.sched.wake. Readiness checks drive
@@ -213,11 +222,40 @@ return function(K)
 
   -- ---- sockets ----
 
+  -- Normalize domain string: "icmp" -> "modem4" (deprecated), "modem" -> "modem4".
+  -- Returns the normalized domain and true if the domain was an alias.
+  local function normalize_domain(domain)
+    if domain == "icmp" then
+      -- DEPRECATED: AF_ICMP is an alias for AF_MODEM4 + IPPROTO_ICMP
+      if K.log then K.log("ipc: AF_ICMP deprecated, use AF_MODEM4 + IPPROTO_ICMP") end
+      return "modem4", true
+    elseif domain == "modem" then
+      -- Legacy: "modem" defaults to AF_MODEM4 (IPv4 over modem)
+      return "modem4", false
+    elseif domain == "inet" then
+      return "modem4", false
+    elseif domain == "inet6" then
+      return "modem6", false
+    end
+    return domain, false
+  end
+
+  -- Is this an ICMP-capable domain (modem4/modem6) with IPPROTO_ICMP?
+  local function is_icmp_socket(domain, proto)
+    return (domain == "modem4" or domain == "modem6")
+      and (proto == 1 or proto == "icmp")
+  end
+
   -- Create a socket fd
   function M.socket(domain, socktype, proto)
+    -- Normalize domain aliases ("icmp" -> "modem4", "modem" -> "modem4")
+    local norm_domain
+    norm_domain, _ = normalize_domain(domain or "unix")
+
     local s = {
       id = next_sock,
-      domain = domain or "unix",
+      domain = norm_domain,
+      domain_input = domain,      -- original domain string (for diagnostics)
       socktype = socktype or "stream",
       proto = proto or 0,
       state = "unbound",        -- unbound | bound | listening | connected
@@ -228,11 +266,11 @@ return function(K)
       peer = nil,
       closed = false,
       -- network sockets
-      port = nil,               -- AF_MODEM bound UDP port
+      port = nil,               -- AF_MODEM4 bound UDP port
       broadcast = false,        -- SO_BROADCAST
       url = nil,                -- AF_HTTP target URL
       response = nil,           -- AF_HTTP canned response
-      -- AF_MODEM STREAM/TCP
+      -- AF_MODEM4 STREAM/TCP
       tcp_conn = nil,           -- TCP connection object (connect/accept)
       tcp_listener = false,     -- this socket is a TCP listener
       -- AF_HTTP real
@@ -242,52 +280,52 @@ return function(K)
       http_method = "GET",      -- GET | POST
       http_headers = {},        -- request headers
       http_body = nil,          -- POST body
-      -- AF_ICMP
+      -- AF_MODEM4 + IPPROTO_ICMP (also handles deprecated "icmp" domain)
       icmp_sock = nil,          -- net_icmp socket object
       dest_ip = nil,            -- ICMP destination (4-byte string)
     }
-    -- AF_ICMP: create the underlying net_icmp socket
-    if domain == "icmp" then
+    -- ICMP socket: AF_MODEM4/AF_MODEM6 with IPPROTO_ICMP (or deprecated "icmp" domain)
+    if is_icmp_socket(norm_domain, proto) then
       if not K.net_icmp then
         error("ICMP module not loaded")
       end
-      s.icmp_sock = K.net_icmp.socket_create(domain, socktype, proto)
+      s.icmp_sock = K.net_icmp.socket_create(norm_domain, socktype, proto)
       s.icmp_sock.id = s.id  -- back-reference for net_icmp to use ipc wakeup
     end
     next_sock = next_sock + 1
     return { type = "socket", sock = s }
   end
 
-  -- Bind a socket to a path (AF_UNIX) or port (AF_MODEM)
+  -- Bind a socket to a path (AF_UNIX) or port (AF_MODEM4/AF_MODEM6)
   function M.socket_bind(proc, fd, path)
     local s = fd.sock
-    if s.domain == "modem" then
-      -- AF_MODEM: bind to a UDP port (root-only)
-      if proc.uid ~= 0 then return nil, "permission denied" end
-      local port = tonumber(path)
-      if not port then return nil, "invalid port" end
-      local ok, err = K.net_transport.udp_bind(port)
-      if not ok then return nil, err end
-      s.state = "bound"
-      s.port = port
-      return true
-    end
-    if s.domain == "modem" and s.socktype == "stream" then
-      -- AF_MODEM STREAM: bind = listen on a TCP port (root-only)
-      if proc.uid ~= 0 then return nil, "permission denied" end
-      local port = tonumber(path)
-      if not port then return nil, "invalid port" end
-      local ok, err = K.net_transport.tcp_listen(port)
-      if not ok then return nil, err end
-      s.state = "listening"
-      s.port = port
-      s.tcp_listener = true
-      return true
-    end
-    if s.domain == "icmp" then
-      -- AF_ICMP: bind to filter address (root-only)
-      if not K.net_icmp then return nil, "ICMP not available" end
-      return K.net_icmp.socket_bind(proc, s.icmp_sock, path)
+    if s.domain == "modem4" or s.domain == "modem6" then
+      if s.icmp_sock then
+        -- AF_MODEM4/AF_MODEM6 + IPPROTO_ICMP: bind to filter address (root-only)
+        if not K.net_icmp then return nil, "ICMP not available" end
+        return K.net_icmp.socket_bind(proc, s.icmp_sock, path)
+      elseif s.socktype == "stream" then
+        -- AF_MODEM4/AF_MODEM6 STREAM: bind = listen on a TCP port (root-only)
+        if proc.uid ~= 0 then return nil, "permission denied" end
+        local port = tonumber(path)
+        if not port then return nil, "invalid port" end
+        local ok, err = K.net_transport.tcp_listen(port)
+        if not ok then return nil, err end
+        s.state = "listening"
+        s.port = port
+        s.tcp_listener = true
+        return true
+      else
+        -- AF_MODEM4/AF_MODEM6 DGRAM: bind to a UDP port (root-only)
+        if proc.uid ~= 0 then return nil, "permission denied" end
+        local port = tonumber(path)
+        if not port then return nil, "invalid port" end
+        local ok, err = K.net_transport.udp_bind(port)
+        if not ok then return nil, err end
+        s.state = "bound"
+        s.port = port
+        return true
+      end
     end
     if s.domain ~= "unix" then return nil, "invalid argument" end
     if unix_sockets[path] then return nil, "address in use" end
@@ -316,11 +354,11 @@ return function(K)
   function M.socket_accept(proc, fd, on_conn)
     local s = fd.sock
     if s.tcp_listener then
-      -- AF_MODEM STREAM: accept from a TCP listener (blocks until a conn)
+      -- AF_MODEM4/AF_MODEM6 STREAM: accept from a TCP listener (blocks until a conn)
       local on_conn_fn = function(conn)
         local cs = {
           id = next_sock,
-          domain = "modem",
+          domain = s.domain,
           socktype = "stream",
           state = "connected",
           tcp_conn = conn,
@@ -365,8 +403,8 @@ return function(K)
       s.peer = path
       return true
     end
-    if s.domain == "modem" and s.socktype == "stream" then
-      -- AF_MODEM STREAM: TCP connect to ip:port
+    if (s.domain == "modem4" or s.domain == "modem6") and s.socktype == "stream" then
+      -- AF_MODEM4/AF_MODEM6 STREAM: TCP connect to ip:port
       local ip_str, port_str = path:match("^(%d+%.%d+%.%d+%.%d+):(%d+)$")
       if not ip_str then return nil, "invalid address" end
       local dest_ip = K.net.str_to_ip(ip_str)
@@ -454,14 +492,14 @@ return function(K)
       K.sched.wait(proc, "http_response", proc.pid)
       return true
     end
-    if s.domain == "modem" and s.tcp_conn then
-      -- AF_MODEM STREAM: TCP send
+    if (s.domain == "modem4" or s.domain == "modem6") and s.tcp_conn then
+      -- AF_MODEM4/AF_MODEM6 STREAM: TCP send
       if s.closed then return nil, "closed" end
       if s.tcp_conn.state ~= "ESTABLISHED" then return nil, "not connected" end
       return K.net_transport.tcp_send(proc, s.tcp_conn, data)
     end
-    if s.domain == "icmp" then
-      -- AF_ICMP: send ICMP packet
+    if s.icmp_sock then
+      -- AF_MODEM4/AF_MODEM6 + IPPROTO_ICMP: send ICMP packet
       if not K.net_icmp then return nil, "ICMP not available" end
       return K.net_icmp.socket_send(proc, s.icmp_sock, data)
     end
@@ -503,13 +541,13 @@ return function(K)
       end
       return nil
     end
-    if s.domain == "modem" and s.tcp_conn then
-      -- AF_MODEM STREAM: TCP recv
+    if (s.domain == "modem4" or s.domain == "modem6") and s.tcp_conn then
+      -- AF_MODEM4/AF_MODEM6 STREAM: TCP recv
       if s.closed then return nil end
       return K.net_transport.tcp_recv(proc, s.tcp_conn)
     end
-    if s.domain == "icmp" then
-      -- AF_ICMP: recv ICMP packet
+    if s.icmp_sock then
+      -- AF_MODEM4/AF_MODEM6 + IPPROTO_ICMP: recv ICMP packet
       if not K.net_icmp then return nil end
       return K.net_icmp.socket_recv(proc, s.icmp_sock, n, flags)
     end
@@ -546,12 +584,12 @@ return function(K)
     return M.pipe_read(proc, { type = "pipe_r", pipe = inp }, n)
   end
 
-  -- Send a datagram to a specific address (AF_MODEM or AF_ICMP)
+  -- Send a datagram to a specific address (AF_MODEM4/AF_MODEM6). Blocks.
   function M.socket_sendto(proc, fd, data, dest_ip, dest_port)
     local s = fd.sock
     if s.closed then return nil, "closed" end
-    if s.domain == "icmp" then
-      -- AF_ICMP: sendto with destination IP
+    if s.icmp_sock then
+      -- AF_MODEM4/AF_MODEM6 + IPPROTO_ICMP: sendto with destination IP
       if not K.net_icmp then return nil, "ICMP not available" end
       local ip4 = K.net.str_to_ip(dest_ip)
       if not ip4 then return nil, "invalid address" end
@@ -559,7 +597,7 @@ return function(K)
       s.icmp_sock.state = "bound"
       return K.net_icmp.socket_sendto(proc, s.icmp_sock, data, ip4, dest_port)
     end
-    if s.domain ~= "modem" then return nil, "invalid argument" end
+    if s.domain ~= "modem4" and s.domain ~= "modem6" then return nil, "invalid argument" end
     if s.state ~= "bound" then return nil, "not bound" end
     if dest_ip == string.char(255, 255, 255, 255) and not s.broadcast then
       return nil, "permission denied"  -- SO_BROADCAST required
@@ -567,16 +605,16 @@ return function(K)
     return K.net_transport.udp_send(s.port, dest_ip, dest_port, data)
   end
 
-  -- Receive a datagram with sender address (AF_MODEM or AF_ICMP). Blocks.
+  -- Receive a datagram with sender address (AF_MODEM4/AF_MODEM6). Blocks.
   function M.socket_recvfrom(proc, fd)
     local s = fd.sock
     if s.closed then return nil end
-    if s.domain == "icmp" then
-      -- AF_ICMP: recvfrom returns data + source IP
+    if s.icmp_sock then
+      -- AF_MODEM4/AF_MODEM6 + IPPROTO_ICMP: recvfrom returns data + source IP
       if not K.net_icmp then return nil end
       return K.net_icmp.socket_recv(proc, s.icmp_sock, nil, nil)
     end
-    if s.domain ~= "modem" then return nil, "invalid argument" end
+    if s.domain ~= "modem4" and s.domain ~= "modem6" then return nil, "invalid argument" end
     if s.state ~= "bound" then return nil, "not bound" end
     return K.net_transport.udp_recv(proc, s.port)
   end
@@ -631,7 +669,7 @@ return function(K)
     if s.tcp_conn and not s.tcp_conn.closed then
       K.net_transport.tcp_close(s.tcp_conn)
     end
-    if s.domain == "icmp" and s.icmp_sock and K.net_icmp then
+    if s.icmp_sock and K.net_icmp then
       K.net_icmp.socket_close(s.icmp_sock)
     end
     if s.path and unix_sockets[s.path] == s then
@@ -651,7 +689,7 @@ return function(K)
   -- Socket readiness (for select)
   function M.socket_readable(s)
     if s.closed then return true end
-    if s.domain == "modem" then
+    if s.domain == "modem4" or s.domain == "modem6" then
       if s.tcp_conn then
         return #s.tcp_conn.recv_queue > 0
           or s.tcp_conn.state == "CLOSE_WAIT"
@@ -662,7 +700,7 @@ return function(K)
     if s.domain == "http" then
       return s.http_response ~= nil or s.http_error ~= nil
     end
-    if s.domain == "icmp" then
+    if s.icmp_sock then
       if K.net_icmp then return K.net_icmp.socket_readable(s.icmp_sock) end
       return false
     end
@@ -677,7 +715,7 @@ return function(K)
 
   function M.socket_writable(s)
     if s.closed then return false end
-    if s.domain == "modem" then
+    if s.domain == "modem4" or s.domain == "modem6" then
       if s.tcp_conn then
         return s.tcp_conn.state == "ESTABLISHED" and #s.tcp_conn.send_queue == 0
       end

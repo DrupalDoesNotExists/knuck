@@ -25,7 +25,7 @@
 | 2 | HAL: CraftOS APIs = "hardware", available only to kernel | §1 | DONE | proc.lua:28-76 (make_env builds sandbox without os/fs/term) | Userspace env has no CraftOS globals |
 | 3 | Drivers touch hardware; even screen output goes syscall→kernel→driver | §1 | DONE | drivers/term.lua backs /dev/console; vfs.lua:30-31 registers term driver | Term output flows through tty layer |
 | 4 | Userspace has no direct hardware access — only syscalls | §1 | DONE | proc.lua:41-73 (env only has syscall wrappers + safe stdlib) | Confirmed by diag.lua sandbox check |
-| 5 | Unified socket API: one surface for AF_UNIX/AF_MODEM/AF_HTTP | §1 | DONE | ipc.lua:203-224 (socket factory); syscall.lua:498-567 (all ops) | Domain selects transport, surface is common |
+| 5 | Unified socket API: one surface for AF_UNIX/AF_MODEM4/AF_MODEM6/AF_HTTP | §1 | DONE | ipc.lua (socket factory); syscall.lua (all ops) | Domain selects transport, surface is common |
 | 6 | Policy in userspace, mechanism in kernel | §1 | DONE | DHCP not in kernel; routing in /sys/net; init.rc is userspace | Kernel provides primitives, userspace decides |
 
 ## 2. Platform and Limitations (SPEC §2)
