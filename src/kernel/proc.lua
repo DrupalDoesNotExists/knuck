@@ -176,10 +176,18 @@ return function(K)
     -- redirection and pipelines). Shares the underlying open file
     -- description, so the child and parent see the same offset/socket.
     if fds and parent and parent.fds then
+      -- Explicit fds table: map child slots to parent fd numbers
       for slot, src in pairs(fds) do
         if parent.fds[src] then
           proc.fds[slot] = parent.fds[src]
         end
+      end
+    elseif parent and parent.fds then
+      -- No explicit fds: inherit parent's fds (POSIX fork semantics).
+      -- This ensures children of getty/login services inherit the tty
+      -- device fds that the parent dup2'd, so writes go to the correct tty.
+      for slot, fd in pairs(parent.fds) do
+        proc.fds[slot] = fd
       end
     end
 
