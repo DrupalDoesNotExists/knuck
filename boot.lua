@@ -239,5 +239,9 @@ else
   print("  ERROR: failed to spawn init")
 end
 
--- 8. Start scheduler (never returns)
+-- 8. Start scheduler (returns only when root requests exit to CraftOS)
 K.sched.start()
+-- Reached only via exit_kernel(): kernel torn down, return to CraftOS shell.
+if term and term.clear then term.clear() end
+if term and term.setCursorPos then term.setCursorPos(1, 1) end
+print("Dropped to CraftOS.")

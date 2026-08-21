@@ -151,8 +151,10 @@ return function(K)
       pgid = pid,
       priority = 0,
       sched_policy = "other",  -- "rr" | "fifo" | "other"
-      cwd = "/",
-      root = "/",
+      -- Inherit parent's cwd/root so `cd` in a shell affects spawned children
+      -- (e.g. `ls` lists the shell's current directory, not always "/").
+      cwd = (parent and parent.cwd) or "/",
+      root = (parent and parent.root) or "/",
       umask = 0x12,  -- 0022 octal
       state = "ready",
       tty = (tty == nil and 1 or tty),

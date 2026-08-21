@@ -333,6 +333,12 @@ return function(K)
     if K.env.os.shutdown then K.env.os.shutdown() end
     return true
   end)
+  -- exit_kernel(): drop the KNUCK kernel and return to clean CraftOS (root only)
+  M.register("exit_kernel", function(proc)
+    if proc.uid ~= 0 then return nil, "permission denied" end
+    K.exit_requested = true
+    return true
+  end)
 
   -- setpgid(pid, pgid) — set process group
   M.register("setpgid", function(proc, pid, pgid)

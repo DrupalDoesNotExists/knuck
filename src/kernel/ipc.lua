@@ -225,6 +225,12 @@ return function(K)
   -- Normalize domain string: "icmp" -> "modem4" (deprecated), "modem" -> "modem4".
   -- Returns the normalized domain and true if the domain was an alias.
   local function normalize_domain(domain)
+    -- numeric AF_* constants from net.lua (K.net.*)
+    local N = K.net
+    if domain == N.AF_UNIX then return "unix", false end
+    if domain == N.AF_MODEM4 then return "modem4", false end  -- also covers AF_ICMP (==2)
+    if domain == N.AF_HTTP then return "http", false end
+    if domain == N.AF_MODEM6 then return "modem6", false end
     if domain == "icmp" then
       -- DEPRECATED: AF_ICMP is an alias for AF_MODEM4 + IPPROTO_ICMP
       if K.log then K.log("ipc: AF_ICMP deprecated, use AF_MODEM4 + IPPROTO_ICMP") end
@@ -238,6 +244,17 @@ return function(K)
       return "modem6", false
     end
     return domain, false
+  end
+
+  -- Normalize socktype: numeric SOCK_* constants (net.lua) or pass strings through.
+  local function normalize_socktype(st)
+    local N = K.net
+    if st == nil then return "stream" end
+    if st == N.SOCK_STREAM then return "stream" end
+    if st == N.SOCK_DGRAM then return "datagram" end
+    if st == "dgram" then return "datagram" end
+    if st == N.SOCK_RAW then return "raw" end
+    return st
   end
 
   -- Is this an ICMP-capable domain (modem4/modem6) with IPPROTO_ICMP?
@@ -256,7 +273,7 @@ return function(K)
       id = next_sock,
       domain = norm_domain,
       domain_input = domain,      -- original domain string (for diagnostics)
-      socktype = socktype or "stream",
+      socktype = normalize_socktype(socktype),
       proto = proto or 0,
       state = "unbound",        -- unbound | bound | listening | connected
       path = nil,
@@ -471,24 +488,27 @@ return function(K)
     local s = fd.sock
     if s.closed then return nil, "closed" end
     if s.domain == "http" then
-      -- AF_HTTP: send fires an async http.request and blocks for the response
+      -- AF_HTTP: send fires an async http.request and blocks for the response.
+      -- CC delivers the response via http_success/http_failure events keyed by URL,
+      -- and http.request() returns only a boolean (no handle), so we track the
+      -- pending request by URL.
       if s.state ~= "connected" then return nil, "not connected" end
       if not http then return nil, "http not available" end
       if s.http_request then return nil, "request in progress" end
       local url = s.url
-      local ok, req
+      local ok
       if s.http_method == "POST" then
-        ok, req = http.request(url, s.http_body or data, s.http_headers or {})
+        ok = http.request(url, s.http_body or data, s.http_headers or {})
       else
         local full_url = url
         if data and #data > 0 then
           full_url = full_url .. (url:find("?") and "&" or "?") .. data
         end
-        ok, req = http.request(full_url)
+        ok = http.request(full_url)
       end
       if not ok then return nil, "request failed" end
-      s.http_request = req
-      http_pending[req] = { proc = proc, socket = s }
+      s.http_request = url
+      http_pending[url] = { proc = proc, socket = s }
       K.sched.wait(proc, "http_response", proc.pid)
       return true
     end
@@ -750,20 +770,20 @@ return function(K)
 
   -- Handle an http_success/http_failure event from the scheduler: match the
   -- completed request to its waiting process and wake it.
-  function M.http_event(kind, req, err_msg)
-    local entry = http_pending[req]
+  function M.http_event(kind, url, extra)
+    local entry = http_pending[url]
     if not entry then return end
-    http_pending[req] = nil
+    http_pending[url] = nil
     local s = entry.socket
     s.http_request = nil
-    if kind == "success" and req.readAll then
-      local body = req.readAll()
-      local code = req.getResponseCode and req.getResponseCode() or 0
-      local headers = req.getResponseHeaders and req.getResponseHeaders() or {}
-      req.close()
+    if kind == "success" and extra and extra.readAll then
+      local body = extra.readAll()
+      local code = extra.getResponseCode and extra.getResponseCode() or 0
+      local headers = extra.getResponseHeaders and extra.getResponseHeaders() or {}
+      extra.close()
       s.http_response = { body = body, code = code, headers = headers }
     else
-      s.http_error = err_msg or "request failed"
+      s.http_error = extra or "request failed"
     end
     K.sched.wake("http_response", entry.proc.pid, true)
   end

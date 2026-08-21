@@ -154,18 +154,23 @@ return function(K)
     if ev[1] == "key" then
       local k = ev[2]
       if k == 201 or k == 199 then
-        M.do_scroll(active, -(get_h() - 1))
-        return
-      elseif k == 209 then
         M.do_scroll(active, get_h() - 1)
         return
-      elseif k == 200 then
-        M.do_scroll(active, -1)
+      elseif k == 209 then
+        M.do_scroll(active, -(get_h() - 1))
         return
-      elseif k == 208 then
+      elseif k == 200 then
         M.do_scroll(active, 1)
         return
+      elseif k == 208 then
+        M.do_scroll(active, -1)
+        return
       end
+    elseif ev[1] == "mouse_scroll" then
+      -- Wheel scroll: direction -1 = up (view older), 1 = down (view newer).
+      -- Map to a single-line scroll in the matching direction.
+      M.do_scroll(active, ev[2] == -1 and 1 or -1)
+      return
     end
     local t = ttys[active]
     if t.scroll ~= 0 then

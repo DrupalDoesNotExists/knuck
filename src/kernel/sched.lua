@@ -169,6 +169,12 @@ return function(K)
     running = true
     local runs_since_idle = 0
     while true do
+      if K.exit_requested then
+        running = false
+        if term and term.clear then term.clear() end
+        if term and term.setCursorPos then term.setCursorPos(1, 1) end
+        return
+      end
       local proc = M.dequeue()
       if proc then
         run(proc)
@@ -226,7 +232,10 @@ return function(K)
         -- also feed /dev/input raw-event readers
         M.wake("input", "input", ev)
       elseif name == "mouse_click" or name == "mouse_scroll" then
-        -- pointer events: feed /dev/input raw-event readers only
+        -- pointer events: feed /dev/input raw-event readers
+        if K.tty and name == "mouse_scroll" then
+          K.tty.handle_input(ev)
+        end
         M.wake("input", "input", ev)
       elseif name == "peripheral" then
         -- device hotplug: mount/unmount disk drives, wake devctl readers
@@ -241,7 +250,7 @@ return function(K)
         end
         M.wake("devctl", "devctl", kind .. " " .. tostring(side))
       elseif name == "http_success" then
-        if K.ipc and K.ipc.http_event then K.ipc.http_event("success", ev[2]) end
+        if K.ipc and K.ipc.http_event then K.ipc.http_event("success", ev[2], ev[3]) end
       elseif name == "http_failure" then
         if K.ipc and K.ipc.http_event then K.ipc.http_event("failure", ev[2], ev[3]) end
       end
