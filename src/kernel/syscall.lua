@@ -804,6 +804,17 @@ return function(K)
     return nil
   end)
 
+  -- settty(id): set controlling tty for calling process (0 = detached)
+  -- Only root may change tty. Used by getty to allocate /dev/ttyN for login.
+  M.register("settty", function(proc, id)
+    if proc.uid ~= 0 then return nil, "permission denied" end
+    if id ~= 0 and (type(id) ~= "number" or id < 1 or id > K.tty.count()) then
+      return nil, "invalid tty"
+    end
+    proc.tty = id or 0
+    return true
+  end)
+
   -- ============================================================
   -- Account database (auth)
   -- ============================================================

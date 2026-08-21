@@ -230,8 +230,8 @@ if not K.selfcheck.collectgarbage then
   print("  memory: soft mode (no collectgarbage)")
 end
 
--- 7. Spawn init (pid 1)
-local init_pid = K.proc.spawn("/sbin/init.lua", 0, 0, 0, {})
+-- 7. Spawn init (pid 1) detached from tty (init has no controlling tty, per Linux)
+local init_pid = K.proc.spawn("/sbin/init.lua", 0, 0, 0, {}, 0)
 if init_pid then
   K.proc.set_init(init_pid)
   print("  init pid " .. init_pid)

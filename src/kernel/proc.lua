@@ -155,7 +155,7 @@ return function(K)
       root = "/",
       umask = 0x12,  -- 0022 octal
       state = "ready",
-      tty = tty or 1,
+      tty = (tty == nil and 1 or tty),
       console_mode = "cooked",  -- /dev/console input: "cooked" (lines) | "raw" (events)
       env = env,
       environ = {},  -- environment variables (name -> value), inherited on spawn

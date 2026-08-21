@@ -27,9 +27,12 @@ return function(K)
   function M.active_id() return active end
 
   -- Write to a process's tty. If that tty is active, render to physical term.
+  -- Detached (tty 0/nil) writes go nowhere (or to log ring) — init is detached.
   function M.write(proc, data)
-    local id = (proc and proc.tty) or 1
+    local id = (proc and proc.tty)
+    if not id or id == 0 then return #(tostring(data or "")) end
     local t = ttys[id]
+    if not t then return #(tostring(data or "")) end
     local s = tostring(data or "")
     t.buffer = t.buffer .. s
     if id == active then
@@ -41,8 +44,11 @@ return function(K)
   -- Read from a process's tty. Blocks until input arrives on that tty.
   -- Cooked mode (default): returns a line of text on Enter.
   -- Raw mode: returns the raw input event table.
+  -- Detached has no tty to read from — return nil.
   function M.read(proc, n)
-    local id = (proc and proc.tty) or 1
+    local id = (proc and proc.tty)
+    if not id or id == 0 then return nil, "no tty" end
+    if not ttys[id] then return nil, "no tty" end
     if proc and proc.console_mode == "raw" then
       K.sched.wait(proc, "tty_input", id)
       return proc.pending_result
