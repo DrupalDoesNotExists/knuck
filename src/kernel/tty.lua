@@ -13,10 +13,81 @@ return function(K)
   local M = {}
 
   local N = 6
+  local SCROLLBACK = 500
   local ttys = {}
   local active = 1
   for i = 1, N do
-    ttys[i] = { id = i, buffer = "", line = "", readers = {} }
+    ttys[i] = { id = i, buffer = "", line = "", readers = {}, scroll = 0 }
+  end
+
+  local function get_h()
+    local ok, w, h = pcall(function() return term.getSize() end)
+    if ok and h then return h end
+    if term and term.getSize then
+      local _, hh = term.getSize()
+      return hh or 19
+    end
+    return 19
+  end
+  local function trim_buffer(t)
+    local cnt = 0
+    for _ in t.buffer:gmatch("\n") do cnt = cnt + 1 end
+    if cnt > SCROLLBACK then
+      local excess = cnt - SCROLLBACK
+      local pos = 1
+      for i = 1, excess do
+        local nl = t.buffer:find("\n", pos, true)
+        if not nl then break end
+        pos = nl + 1
+      end
+      t.buffer = t.buffer:sub(pos)
+      if t.scroll > 0 then t.scroll = math.max(0, t.scroll - excess) end
+    end
+  end
+  local function redraw(t)
+    term.clear()
+    term.setCursorPos(1, 1)
+    if t.scroll == 0 then
+      K.term_write(t.buffer)
+    else
+      local buf = t.buffer
+      local lines = {}
+      local i = 1
+      while true do
+        local nl = buf:find("\n", i, true)
+        if nl then
+          lines[#lines+1] = buf:sub(i, nl-1)
+          i = nl + 1
+        else
+          lines[#lines+1] = buf:sub(i)
+          break
+        end
+      end
+      if buf:sub(-1) == "\n" and lines[#lines] == "" then table.remove(lines) end
+      local h = get_h()
+      local total = #lines
+      local start = math.max(1, total - h - t.scroll + 1)
+      local finish = math.min(total, total - t.scroll)
+      local slice = {}
+      for idx = start, finish do slice[#slice+1] = lines[idx] end
+      local text = table.concat(slice, "\n")
+      if total > 0 and buf:sub(-1) == "\n" and finish == total then text = text .. "\n" end
+      K.term_write(text)
+    end
+  end
+  function M.do_scroll(id, delta)
+    local t = ttys[id]
+    if not t then return end
+    local h = get_h()
+    local cnt = 0
+    for _ in t.buffer:gmatch("\n") do cnt = cnt + 1 end
+    if t.buffer:sub(-1) ~= "\n" and #t.buffer > 0 then cnt = cnt + 1 end
+    local max_scroll = math.max(0, cnt - h)
+    if max_scroll == 0 then return end
+    t.scroll = t.scroll + delta
+    if t.scroll < 0 then t.scroll = 0 end
+    if t.scroll > max_scroll then t.scroll = max_scroll end
+    redraw(t)
   end
 
   function M.init(K)
@@ -35,8 +106,11 @@ return function(K)
     if not t then return #(tostring(data or "")) end
     local s = tostring(data or "")
     t.buffer = t.buffer .. s
+    trim_buffer(t)
     if id == active then
-      K.term_write(s)
+      if t.scroll == 0 then
+        K.term_write(s)
+      end
     end
     return #s
   end
@@ -61,6 +135,7 @@ return function(K)
   function M.switch(id)
     if not ttys[id] then return false end
     active = id
+    ttys[id].scroll = 0
     term.clear()
     term.setCursorPos(1, 1)
     K.term_write(ttys[id].buffer)
@@ -76,10 +151,27 @@ return function(K)
   end
 
   function M.handle_input(ev)
+    if ev[1] == "key" then
+      local k = ev[2]
+      if k == 201 or k == 199 then
+        M.do_scroll(active, -(get_h() - 1))
+        return
+      elseif k == 209 then
+        M.do_scroll(active, get_h() - 1)
+        return
+      end
+    end
+    local t = ttys[active]
+    if t.scroll ~= 0 then
+      if ev[1] == "char" or (ev[1] == "key" and (ev[2] == 14 or ev[2] == 259 or ev[2] == 28 or ev[2] == 13 or ev[2] == 257 or ev[2] == 200 or ev[2] == 208)) then
+        t.scroll = 0
+        redraw(t)
+      end
+    end
     -- Wake raw readers on the active tty (only the active VT receives input,
     -- matching real terminal behavior). Getty must call VT_ACTIVATE to make
     -- its tty active before reading.
-    local t = ttys[active]
+    -- Shift+PageUp/PageDown already handled above (also handle held shift variant bare PageUp)
     K.sched.wake("tty_input", active, ev)
 
     -- Cooked processing only when a cooked waiter exists.
@@ -136,7 +228,8 @@ return function(K)
         local t = ttys[id]
         local s = tostring(data or "")
         t.buffer = t.buffer .. s
-        if id == active then K.term_write(s) end
+        trim_buffer(t)
+        if id == active and t.scroll == 0 then K.term_write(s) end
         return #s
       end,
       read = function(n)
