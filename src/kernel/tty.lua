@@ -71,6 +71,9 @@ return function(K)
   -- Raw readers get the event directly; cooked readers accumulate chars
   -- into the line buffer and are woken with the line on Enter.
   function M.handle_input(ev)
+    -- Wake raw readers on the active tty (only the active VT receives input,
+    -- matching real terminal behavior). Getty must call VT_ACTIVATE to make
+    -- its tty active before reading.
     local t = ttys[active]
     K.sched.wake("tty_input", active, ev)
     if ev[1] == "char" then

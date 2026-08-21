@@ -637,7 +637,7 @@ return function(K)
       end
       local drv = devices[ino.device]
       if not drv then return nil, "no such device" end
-      return { type = "device", device = ino.device, driver = drv, mode = flags or "r" }
+      return { type = "device", device = ino.device, driver = drv, mode = flags or "r", path = p }
     end
 
     if ino.type == "fifo" then

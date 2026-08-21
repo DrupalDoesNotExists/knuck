@@ -162,11 +162,23 @@ return function(K)
   -- Main scheduler loop. Never returns.
   function M.start()
     running = true
+    local runs_since_idle = 0
     while true do
       local proc = M.dequeue()
       if proc then
         run(proc)
+        runs_since_idle = runs_since_idle + 1
+        -- Starvation guard: force an idle tick every 256 consecutive runs
+        -- so pending OS events (timers, network, input) are always dispatched
+        -- within a bounded time even when processes never block.
+        if runs_since_idle >= 256 then
+          runs_since_idle = 0
+          K.env.os.startTimer(0)
+          local ev = { K.env.os.pullEvent() }
+          K.events.dispatch(ev)
+        end
       else
+        runs_since_idle = 0
         -- Idle: wait for an OS event, dispatch to waiting processes
         local ev = { K.env.os.pullEvent() }
         K.events.dispatch(ev)

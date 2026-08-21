@@ -805,12 +805,10 @@ return function(K)
       local fd = proc.fds[fdnum]
       if not fd then return nil, "bad fd" end
       if proc.uid ~= 0 then return nil, "permission denied" end
-      -- fd should be a tty device (/dev/ttyN); derive id from path if arg not given
-      local id = arg
-      if type(id) ~= "number" then
-        if fd.path then id = tonumber(fd.path:match("tty(%d+)")) end
-        if not id and fd.tty_id then id = fd.tty_id end
-      end
+      -- fd should be a tty device (/dev/ttyN); derive id from arg or fd
+      local id = (type(arg) == "number" and arg > 0) and arg or nil
+      if not id and fd.path then id = tonumber(fd.path:match("tty(%d+)")) end
+      if not id and fd.tty_id then id = fd.tty_id end
       if not id or id < 1 or id > K.tty.count() then return nil, "invalid tty" end
       proc.tty = id
       return true
