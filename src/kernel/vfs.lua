@@ -89,6 +89,50 @@ return function(K)
   -- Thin wrapper over a CC peripheral at a side. write "method arg1 arg2"
   -- calls peripheral.call(side, method, ...). read returns nil (peripherals
   -- are method-based, not streams).
+  -- Argument parsing is quote-aware so string args may contain spaces, e.g.
+  -- write "hello world" -> peripheral.call(side, "write", "hello world").
+  local function parse_periph_args(rest)
+    local args = {}
+    local i, n = 1, #rest
+    while i <= n do
+      while i <= n and rest:sub(i, i):match("%s") do i = i + 1 end
+      if i > n then break end
+      local c = rest:sub(i, i)
+      if c == '"' then
+        i = i + 1
+        local buf = {}
+        while i <= n do
+          local ch = rest:sub(i, i)
+          if ch == "\\" and i < n then
+            local nx = rest:sub(i + 1, i + 1)
+            if nx == '"' or nx == "\\" then
+              buf[#buf + 1] = nx
+              i = i + 2
+            else
+              buf[#buf + 1] = ch
+              i = i + 1
+            end
+          elseif ch == '"' then
+            i = i + 1
+            break
+          else
+            buf[#buf + 1] = ch
+            i = i + 1
+          end
+        end
+        args[#args + 1] = table.concat(buf)
+      else
+        local buf = {}
+        while i <= n and not rest:sub(i, i):match("%s") do
+          buf[#buf + 1] = rest:sub(i, i)
+          i = i + 1
+        end
+        args[#args + 1] = table.concat(buf)
+      end
+    end
+    return args
+  end
+
   local function make_periph_driver(side)
     return {
       mode = 0x1B6,
@@ -97,8 +141,7 @@ return function(K)
         if not peripheral then return 0 end
         local method, rest = tostring(data):match("^(%S+)%s*(.*)$")
         if not method then return 0 end
-        local args = {}
-        for a in (rest or ""):gmatch("%S+") do args[#args + 1] = a end
+        local args = parse_periph_args(rest or "")
         local ok = pcall(peripheral.call, side, method, table.unpack(args))
         return ok and #data or 0
       end,

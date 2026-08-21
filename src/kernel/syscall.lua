@@ -416,6 +416,17 @@ return function(K)
   end
 
   M.register("open", function(proc, path, flags, mode)
+    -- PTY master: open("/dev/ptmx") creates a master+slave pair and returns
+    -- the master fd. The slave is available at /dev/ptsN (see ptsname()).
+    if path == "/dev/ptmx" then
+      local r = K.tty.create_pty()
+      if not r then return nil, "pty allocation failed" end
+      local fd = { type = "device", device = "ptmx", driver = r.master_drv,
+        pty = r.pty, slave_id = r.slave_id, mode = flags or "r" }
+      local n = alloc_fd(proc, fd)
+      if not n then return nil, "too many open files" end
+      return n
+    end
     -- Normalize flags: accept POSIX numeric flags (O_RDONLY=0, O_WRONLY=1,
     -- O_RDWR=2, O_APPEND=0x400) or string modes ("r"/"w"/"a"). CraftOS
     -- fs.open only understands string modes.
@@ -436,6 +447,15 @@ return function(K)
     local n = alloc_fd(proc, fd)
     if not n then return nil, "too many open files" end
     return n
+  end)
+
+  -- ptsname(master_fd) -> slave path "/dev/ptsN" for an open /dev/ptmx fd.
+  M.register("ptsname", function(proc, fdnum)
+    local fd = proc.fds[fdnum]
+    if not fd or fd.device ~= "ptmx" or not fd.pty then
+      return nil, "not a pty master"
+    end
+    return "/dev/pts" .. fd.slave_id
   end)
 
   M.register("close", function(proc, fdnum)

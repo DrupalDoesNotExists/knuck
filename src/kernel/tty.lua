@@ -230,7 +230,157 @@ return function(K)
     proc.tty = id or 1
   end
 
-  -- Device driver for /dev/ttyN
+  -- ===== PTY (pseudo-terminal) subsystem =====
+  -- General master/slave pty, like Linux pts. open("/dev/ptmx") creates a
+  -- master+slave pair; the slave (/dev/ptsN) is a full tty (input fed by the
+  -- master, output read by the master, with echo/raw/cooked line discipline).
+  -- A proxy (e.g. ttybcd) opens the master, runs a shell on the slave, and
+  -- shuttles bytes between the slave and a real terminal — optionally
+  -- broadcasting the slave's output to other consumers (monitors). The shell
+  -- runs on the slave and works unchanged (it does its own raw mode + echo).
+
+  local ptys = {}        -- slave_id -> pty state
+  local next_pts = 0
+
+  local function pty_echo(pty, s)
+    pty.output[#pty.output + 1] = s
+    K.sched.wake("pty_output", pty.slave_id, true)
+  end
+
+  -- Feed a raw input event from the master into the pty's input side.
+  -- Discipline (raw/cooked) follows the current reader's console_mode.
+  local function pty_feed(pty, ev)
+    if pty.mode == "raw" then
+      pty.input_raw[#pty.input_raw + 1] = ev
+      K.sched.wake("pty_input", pty.slave_id, true)
+      return
+    end
+    -- cooked: build line + echo to output (master displays it)
+    if type(ev) == "table" then
+      if ev[1] == "char" then
+        local ch = ev[2]
+        if ch == "\b" or ch == "\x7f" then
+          if #pty.line > 0 then pty.line = pty.line:sub(1, -2); pty_echo(pty, "\b \b") end
+        elseif ch == "\n" or ch == "\r" then
+          pty_echo(pty, "\n")
+          pty.line_ready = pty.line
+          pty.line = ""
+          K.sched.wake("pty_cooked", pty.slave_id, true)
+        else
+          pty.line = pty.line .. ch
+          pty_echo(pty, ch)
+        end
+      elseif ev[1] == "key" then
+        local k = ev[2]
+        if k == 14 or k == 259 then
+          if #pty.line > 0 then pty.line = pty.line:sub(1, -2); pty_echo(pty, "\b \b") end
+        elseif k == 28 or k == 13 or k == 257 then
+          pty_echo(pty, "\n")
+          pty.line_ready = pty.line
+          pty.line = ""
+          K.sched.wake("pty_cooked", pty.slave_id, true)
+        end
+      end
+    elseif type(ev) == "string" then
+      pty.line = pty.line .. ev
+      pty_echo(pty, ev)
+    end
+  end
+
+  -- Create a pty. Returns { pty, slave_id, master_drv, slave_drv }.
+  function M.create_pty()
+    local slave_id = next_pts
+    next_pts = next_pts + 1
+    local pty = {
+      slave_id = slave_id,
+      input_raw = {},
+      output = {},
+      line = "",
+      line_ready = nil,
+      mode = "cooked",
+    }
+    ptys[slave_id] = pty
+
+    -- Slave driver: the tty the shell runs on.
+    local slave_drv = {
+      mode = 0x1B6,
+      open = function()
+        local proc = K.sched.current()
+        if proc then proc.tty = slave_id end
+      end,
+      read = function(n)
+        local proc = K.sched.current()
+        pty.mode = proc.console_mode or "cooked"
+        if pty.mode == "raw" then
+          if #pty.input_raw > 0 then return table.remove(pty.input_raw, 1) end
+          K.sched.wait(proc, "pty_input", pty.slave_id, function()
+            if #pty.input_raw > 0 then return table.remove(pty.input_raw, 1) end
+            return nil
+          end)
+        else
+          if pty.line_ready then
+            local l = pty.line_ready
+            pty.line_ready = nil
+            return l
+          end
+          K.sched.wait(proc, "pty_cooked", pty.slave_id, function()
+            if pty.line_ready then
+              local l = pty.line_ready
+              pty.line_ready = nil
+              return l
+            end
+            return nil
+          end)
+        end
+      end,
+      write = function(data)
+        local s = tostring(data or "")
+        pty.output[#pty.output + 1] = s
+        K.sched.wake("pty_output", pty.slave_id, true)
+        return #s
+      end,
+      ioctl = function(request, arg)
+        return true
+      end,
+    }
+
+    -- Master driver: the proxy end (read = slave output, write = slave input).
+    local master_drv = {
+      mode = 0x1B6,
+      read = function(n)
+        if #pty.output > 0 then return table.remove(pty.output, 1) end
+        local proc = K.sched.current()
+        K.sched.wait(proc, "pty_output", pty.slave_id, function()
+          if #pty.output > 0 then return table.remove(pty.output, 1) end
+          return nil
+        end)
+      end,
+      write = function(data)
+        if type(data) == "table" then
+          pty_feed(pty, data)
+        elseif type(data) == "string" then
+          for i = 1, #data do
+            pty_feed(pty, { "char", data:sub(i, i) })
+          end
+        end
+        return #tostring(data or "")
+      end,
+    }
+
+    -- Register the slave device so it can be opened at /dev/ptsN.
+    K.vfs.register_device("pts" .. slave_id, slave_drv)
+
+    return { pty = pty, slave_id = slave_id, master_drv = master_drv, slave_drv = slave_drv }
+  end
+
+  -- Build a master fd object for an already-created pty (used by open()).
+  function M.pty_master_fd(slave_id)
+    local pty = ptys[slave_id]
+    if not pty then return nil end
+    return { type = "device", device = "ptmx", driver = pty.master_drv, pty = pty, slave_id = slave_id }
+  end
+
+  -- Device driver for /dev/tyN
   function M.make_driver(id)
     return {
       mode = 0x1B6,
