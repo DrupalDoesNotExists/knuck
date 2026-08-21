@@ -105,6 +105,40 @@ return function(K)
     }
   end
 
+  -- /dev/peripherals helpers: side <-> type mapping, dynamic enumeration
+  local periph_type_plural = {
+    monitor = "monitors", computer = "computers", modem = "modems",
+    drive = "drives", printer = "printers", turtle = "turtles",
+    speaker = "speakers", energy = "energy",
+  }
+  local function periph_sides()
+    if not (peripheral and peripheral.getNames) then return {} end
+    local ok, names = pcall(peripheral.getNames)
+    if not ok or type(names) ~= "table" then return {} end
+    return names
+  end
+  local function periph_type_of(side)
+    if not (peripheral and peripheral.getType) then return nil end
+    local ok, t = pcall(peripheral.getType, side)
+    return ok and t or nil
+  end
+  local function periph_devices_by_type(plural)
+    local out = {}
+    for _, side in ipairs(periph_sides()) do
+      local t = periph_type_of(side)
+      if t and periph_type_plural[t] == plural then out[#out+1] = side end
+    end
+    table.sort(out)
+    return out
+  end
+  local function side_for_typed(plural, name)
+    -- name like monitor0, printer2 -> index 0-based
+    local idx = tonumber(name:match("(%d+)$"))
+    if idx == nil then return nil end
+    local list = periph_devices_by_type(plural)
+    return list[idx+1] -- 0 -> 1st
+  end
+
   function M.mount_root()
     mounts["/"] = { fstype = "disk", real_root = "/" }
     mounts["/boot"] = { fstype = "disk", real_root = "/boot" }
@@ -494,11 +528,50 @@ return function(K)
 
   -- /dev: device nodes
   local function dev_list()
-    local out = { "console", "null", "zero", "urandom", "input", "devctl", "periph" }
+    local out = { "console", "null", "zero", "urandom", "input", "devctl", "periph", "peripherals" }
     for name in pairs(devices) do
       if name ~= "console" then out[#out + 1] = name end
     end
     return out
+  end
+
+  local function peripherals_list(path)
+    if path == "/dev/peripherals" then
+      local out = {}
+      -- side aliases
+      for _, side in ipairs(periph_sides()) do out[#out+1] = side end
+      -- type dirs (list all known plurals that currently have at least one device, plus keep empty dirs for discoverability)
+      local seen = {}
+      for _, side in ipairs(periph_sides()) do
+        local t = periph_type_of(side)
+        local pl = t and periph_type_plural[t]
+        if pl and not seen[pl] then seen[pl]=true; out[#out+1]=pl end
+      end
+      -- ensure well-known empty type dirs appear for enumeration (user spec: пустые диры если устройств не подключено)
+      for _, pl in ipairs({"monitors","printers","modems","drives","computers","turtles"}) do
+        if not seen[pl] then out[#out+1]=pl end
+      end
+      table.sort(out)
+      return out
+    end
+    local pl = path:match("^/dev/peripherals/([^/]+)$")
+    if pl then
+      local list = periph_devices_by_type(pl)
+      local out = {}
+      for i, side in ipairs(list) do
+        local base = pl:sub(1, -2) -- monitors->monitor
+        if pl == "monitors" then base="monitor"
+        elseif pl == "printers" then base="printer"
+        elseif pl == "modems" then base="modem"
+        elseif pl == "drives" then base="drive"
+        elseif pl == "computers" then base="computer"
+        elseif pl == "turtles" then base="turtle"
+        end
+        out[#out+1] = base..(i-1)
+      end
+      return out
+    end
+    return {}
   end
 
   -- ---- inode lookup for a canonical path ----
@@ -518,6 +591,39 @@ return function(K)
       end
       if name:match("^periph/") then
         return { type = "device", mode = 0x1B6, uid = 0, gid = 0, nlink = 1, device = name }
+      end
+      if name == "peripherals" then
+        return { type = "dir", mode = 0x1ED, uid = 0, gid = 0, nlink = 1 }
+      end
+      if name:match("^peripherals/[^/]+/[^/]+$") then
+        -- type device: monitors/monitor0 etc.
+        local pl, dev = name:match("^peripherals/([^/]+)/([^/]+)$")
+        local side = side_for_typed(pl, dev)
+        if side then
+          return { type = "device", mode = 0x1B6, uid = 0, gid = 0, nlink = 1, device = "periph/"..side }
+        end
+        return nil
+      end
+      if name:match("^peripherals/[^/]+$") then
+        local sub = name:match("^peripherals/([^/]+)$")
+        -- side device ?
+        for _, side in ipairs(periph_sides()) do
+          if side == sub then
+            return { type = "device", mode = 0x1B6, uid = 0, gid = 0, nlink = 1, device = "periph/"..side }
+          end
+        end
+        -- type dir
+        if sub=="monitors" or sub=="printers" or sub=="modems" or sub=="drives" or sub=="computers" or sub=="turtles" or sub=="speakers" or sub=="energy" then
+          return { type = "dir", mode = 0x1ED, uid = 0, gid = 0, nlink = 1 }
+        end
+        -- also allow any type that currently exists dynamically
+        for _, side in ipairs(periph_sides()) do
+          local t = periph_type_of(side)
+          if t and periph_type_plural[t]==sub then
+            return { type = "dir", mode = 0x1ED, uid = 0, gid = 0, nlink = 1 }
+          end
+        end
+        return nil
       end
       if devices[name] then
         local drv = devices[name]
@@ -583,7 +689,10 @@ return function(K)
     local names
     if m.fstype == "proc" then names = proc_list()
     elseif m.fstype == "sys" then names = sys_list(p)
-    elseif m.fstype == "dev" then names = dev_list()
+    elseif m.fstype == "dev" then
+      if p == "/dev" then names = dev_list()
+      elseif p:match("^/dev/peripherals") then names = peripherals_list(p)
+      else names = {} end
     else names = fs_mod.list(p) end
     -- structured entries: {name, is_dir, type, mode, size}
     local out = {}
