@@ -67,6 +67,11 @@ return function(K)
     waiting[reason][key] = proc
   end
 
+  -- Check if a process is waiting on a given reason/key pair.
+  function M.is_waiting(reason, key)
+    return waiting[reason] ~= nil and waiting[reason][key] ~= nil
+  end
+
   -- Wake a waiting process (resume it with a result)
   function M.wake(reason, key, result)
     local w = waiting[reason]

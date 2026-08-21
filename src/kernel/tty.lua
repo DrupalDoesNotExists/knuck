@@ -82,6 +82,12 @@ return function(K)
     local t = ttys[active]
     K.sched.wake("tty_input", active, ev)
 
+    -- Cooked processing only when a cooked waiter exists.
+    -- In raw mode (login password prompt, etc.) no cooked waiter is present,
+    -- so line buffering, echo, and cooked wake are all skipped — preventing
+    -- double echo and password leakage.
+    if not K.sched.is_waiting("tty_cooked", active) then return end
+
     -- Backspace / delete — erase last char from cooked line buffer
     if ev[1] == "key" and (ev[2] == 14 or ev[2] == 259) then  -- Backspace(14), Delete(259)
       if #t.line > 0 then
