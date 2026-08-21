@@ -793,26 +793,28 @@ return function(K)
 
   -- ioctl(fd, request, arg): tty_switch switches the active terminal;
   -- console_mode switches /dev/console between "cooked" (lines) and "raw"
-  -- (events) input.
+  -- (events) input; TIOCSCTTY makes fd's tty the controlling tty (real Linux)
   M.register("ioctl", function(proc, fdnum, request, arg)
     if request == "tty_switch" then
       return K.tty.switch(arg)
     elseif request == "console_mode" then
       proc.console_mode = (arg == "raw") and "raw" or "cooked"
       return true
+    elseif request == "TIOCSCTTY" then
+      local fd = proc.fds[fdnum]
+      if not fd then return nil, "bad fd" end
+      if proc.uid ~= 0 then return nil, "permission denied" end
+      -- fd should be a tty device (/dev/ttyN); derive id from path if arg not given
+      local id = arg
+      if type(id) ~= "number" then
+        if fd.path then id = tonumber(fd.path:match("tty(%d+)")) end
+        if not id and fd.tty_id then id = fd.tty_id end
+      end
+      if not id or id < 1 or id > K.tty.count() then return nil, "invalid tty" end
+      proc.tty = id
+      return true
     end
     return nil
-  end)
-
-  -- settty(id): set controlling tty for calling process (0 = detached)
-  -- Only root may change tty. Used by getty to allocate /dev/ttyN for login.
-  M.register("settty", function(proc, id)
-    if proc.uid ~= 0 then return nil, "permission denied" end
-    if id ~= 0 and (type(id) ~= "number" or id < 1 or id > K.tty.count()) then
-      return nil, "invalid tty"
-    end
-    proc.tty = id or 0
-    return true
   end)
 
   -- ============================================================
