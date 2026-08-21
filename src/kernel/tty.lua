@@ -174,7 +174,7 @@ return function(K)
     end
     local t = ttys[active]
     if t.scroll ~= 0 then
-      if ev[1] == "char" or (ev[1] == "key" and (ev[2] == 14 or ev[2] == 259 or ev[2] == 28 or ev[2] == 13 or ev[2] == 257 or ev[2] == 200 or ev[2] == 208)) then
+      if ev[1] == "char" or (ev[1] == "key" and (ev[2] == 14 or ev[2] == 259 or ev[2] == 28 or ev[2] == 13 or ev[2] == 257)) then
         t.scroll = 0
         redraw(t)
       end
