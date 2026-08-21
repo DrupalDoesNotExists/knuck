@@ -70,22 +70,46 @@ return function(K)
   -- Route an input event to the active tty's readers.
   -- Raw readers get the event directly; cooked readers accumulate chars
   -- into the line buffer and are woken with the line on Enter.
+  -- Echo helpers for cooked mode — user must see what they type.
+  local function echo(s)
+    if active == ttys[active].id then K.term_write(s) end
+  end
+
   function M.handle_input(ev)
     -- Wake raw readers on the active tty (only the active VT receives input,
     -- matching real terminal behavior). Getty must call VT_ACTIVATE to make
     -- its tty active before reading.
     local t = ttys[active]
     K.sched.wake("tty_input", active, ev)
+
+    -- Backspace / delete — erase last char from cooked line buffer
+    if ev[1] == "key" and (ev[2] == 14 or ev[2] == 259) then  -- Backspace(14), Delete(259)
+      if #t.line > 0 then
+        t.line = t.line:sub(1, -2)
+        echo("\b \b")
+      end
+      return
+    end
+
     if ev[1] == "char" then
       local ch = ev[2]
-      if ch == "\n" or ch == "\r" then
+      -- Also handle \b and DEL (\x7f) as backspace in char events
+      if ch == "\b" or ch == "\x7f" then
+        if #t.line > 0 then
+          t.line = t.line:sub(1, -2)
+          echo("\b \b")
+        end
+      elseif ch == "\n" or ch == "\r" then
+        echo("\n")
         local line = t.line
         t.line = ""
         K.sched.wake("tty_cooked", active, line)
       else
         t.line = t.line .. ch
+        echo(ch)  -- echo typed character to active terminal
       end
     elseif ev[1] == "key" and ev[2] == 28 then  -- Enter key
+      echo("\n")
       local line = t.line
       t.line = ""
       K.sched.wake("tty_cooked", active, line)
