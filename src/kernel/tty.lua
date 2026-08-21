@@ -159,6 +159,12 @@ return function(K)
       elseif k == 209 then
         M.do_scroll(active, get_h() - 1)
         return
+      elseif k == 200 then
+        M.do_scroll(active, -1)
+        return
+      elseif k == 208 then
+        M.do_scroll(active, 1)
+        return
       end
     end
     local t = ttys[active]
