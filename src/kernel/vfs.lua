@@ -35,12 +35,12 @@ return function(K)
         M.register_device("tty" .. i, K.tty.make_driver(i))
       end
     end
-    -- devctl: control device. write "tty_switch <id>" switches active tty.
+    -- devctl: control device. write "VT_ACTIVATE <id>" switches active tty.
     M.register_device("devctl", {
       mode = 0x1B6,
       write = function(data)
         local s = tostring(data or "")
-        local id = s:match("tty_switch%s+(%d+)")
+        local id = s:match("VT_ACTIVATE%s+(%d+)") or s:match("tty_switch%s+(%d+)")
         if id and K.tty then
           return K.tty.switch(tonumber(id)) and #s or 0
         end

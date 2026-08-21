@@ -5,7 +5,7 @@ SYNOPSIS
   ioctl(fd, request, arg)
 
 DESCRIPTION
-  Device control. tty_switch: switch terminal. console_mode: 'cooked'|'raw' on /dev/console.
+  Device control. VT_ACTIVATE: switch terminal. TCSETS: 'cooked'|'raw' on /dev/console. TIOCSCTTY: set controlling tty.
 
 RETURN VALUES
   true or nil

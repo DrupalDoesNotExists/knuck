@@ -791,13 +791,14 @@ return function(K)
   -- Virtual terminals (tty)
   -- ============================================================
 
-  -- ioctl(fd, request, arg): tty_switch switches the active terminal;
-  -- console_mode switches /dev/console between "cooked" (lines) and "raw"
-  -- (events) input; TIOCSCTTY makes fd's tty the controlling tty (real Linux)
+  -- ioctl(fd, request, arg): VT_ACTIVATE switches active terminal;
+  -- TCSETS sets /dev/console input mode ('cooked' lines / 'raw' events);
+  -- TIOCSCTTY makes fd's tty the controlling tty (real Linux).
+  -- Old names "tty_switch" / "console_mode" kept as aliases.
   M.register("ioctl", function(proc, fdnum, request, arg)
-    if request == "tty_switch" then
+    if request == "VT_ACTIVATE" or request == "tty_switch" then
       return K.tty.switch(arg)
-    elseif request == "console_mode" then
+    elseif request == "TCSETS" or request == "console_mode" then
       proc.console_mode = (arg == "raw") and "raw" or "cooked"
       return true
     elseif request == "TIOCSCTTY" then

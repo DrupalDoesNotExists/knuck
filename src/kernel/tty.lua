@@ -5,7 +5,7 @@
   ACTIVE tty renders to the physical CraftOS terminal; inactive ttys buffer
   their output. Input (char/key) is routed to the active tty's readers.
 
-  Switching: ioctl(fd, "tty_switch", id) on /dev/console, or a devctl
+  Switching: ioctl(fd, "VT_ACTIVATE", id) on /dev/console, or a devctl
   write. Each process is bound to a tty (proc.tty, default 1).
 ]]
 
