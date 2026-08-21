@@ -84,6 +84,21 @@ return function(K)
   M.register("getpgrp", function(proc) return proc.pgid end)
   M.register("getcwd", function(proc) return proc.cwd end)
 
+  -- getenv / setenv: process environment variables
+  M.register("getenv", function(proc, name)
+    return proc.environ and proc.environ[name]
+  end)
+  M.register("setenv", function(proc, name, value)
+    if not name then return false end
+    if value == nil then
+      if proc.environ then proc.environ[name] = nil end
+    else
+      if not proc.environ then proc.environ = {} end
+      proc.environ[name] = tostring(value)
+    end
+    return true
+  end)
+
   -- exit
   M.register("exit", function(proc, code)
     proc_mod.exit(proc, code or 0)
@@ -141,7 +156,24 @@ return function(K)
   -- spawn a child process
   M.register("spawn", function(proc, path, ...)
     local args = { ... }
-    return proc_mod.spawn(path, proc.pid, proc.uid, proc.gid, args, proc.tty)
+    -- optional trailing fds table: { [0]=fdnum, [1]=fdnum, [2]=fdnum }
+    -- wires the child's stdin/stdout/stderr to the parent's open fds
+    -- (shares the underlying open file description, like dup).
+    local fds = nil
+    if type(args[#args]) == "table" then
+      fds = args[#args]
+      args[#args] = nil
+    end
+    -- optional trailing boolean: system flag (full env, root-only)
+    local system = false
+    if type(args[#args]) == "boolean" and args[#args] then
+      system = true
+      args[#args] = nil
+    end
+    if system and proc.uid ~= 0 then
+      return nil, "permission denied: only root may spawn system processes"
+    end
+    return proc_mod.spawn(path, proc.pid, proc.uid, proc.gid, args, proc.tty, fds, proc, system)
   end)
 
   -- exec(path, ...) — execve(2) analog: replace the current process image.
@@ -160,8 +192,8 @@ return function(K)
     -- setuid/setgid bits (04000=0x800, 02000=0x400 octal)
     if K.bit.band(ino.mode, 0x800) ~= 0 then proc.euid = ino.uid end
     if K.bit.band(ino.mode, 0x400) ~= 0 then proc.egid = ino.gid end
-    -- fresh sandbox env + load the new image
-    local env = proc_mod.make_env()
+    -- fresh sandbox env + load the new image (preserve system flag)
+    local env = proc_mod.make_env(proc.system)
     local fn, err = K.vfs.loadfile(resolved, env)
     if not fn then return nil, err end
     proc.co = coroutine.create(function()
@@ -378,6 +410,17 @@ return function(K)
   end
 
   M.register("open", function(proc, path, flags, mode)
+    -- Normalize flags: accept POSIX numeric flags (O_RDONLY=0, O_WRONLY=1,
+    -- O_RDWR=2, O_APPEND=0x400) or string modes ("r"/"w"/"a"). CraftOS
+    -- fs.open only understands string modes.
+    if type(flags) == "number" then
+      local n = flags
+      local acc = n % 8
+      if acc == 1 then flags = "w"
+      elseif acc == 2 then flags = "r"
+      else flags = "r" end
+      if math.floor(n / 0x400) % 2 == 1 then flags = flags .. "a" end
+    end
     local fd, err = K.vfs.open(proc, path, flags or "r", mode, function(f)
       local n = alloc_fd(proc, f)
       if not n then return nil, "too many open files" end
@@ -542,7 +585,7 @@ return function(K)
   end)
 
   -- select(readfds, writefds, exceptfds, timeout) -> r, w, e
-  M.register("select", function(proc, readfds, writefds, exceptfds, timeout)
+  M.register("fdselect", function(proc, readfds, writefds, exceptfds, timeout)
     local r, w, e = {}, {}, {}
     local function check()
       r, w, e = {}, {}, {}

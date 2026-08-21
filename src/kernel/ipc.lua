@@ -242,7 +242,18 @@ return function(K)
       http_method = "GET",      -- GET | POST
       http_headers = {},        -- request headers
       http_body = nil,          -- POST body
+      -- AF_ICMP
+      icmp_sock = nil,          -- net_icmp socket object
+      dest_ip = nil,            -- ICMP destination (4-byte string)
     }
+    -- AF_ICMP: create the underlying net_icmp socket
+    if domain == "icmp" then
+      if not K.net_icmp then
+        error("ICMP module not loaded")
+      end
+      s.icmp_sock = K.net_icmp.socket_create(domain, socktype, proto)
+      s.icmp_sock.id = s.id  -- back-reference for net_icmp to use ipc wakeup
+    end
     next_sock = next_sock + 1
     return { type = "socket", sock = s }
   end
@@ -272,6 +283,11 @@ return function(K)
       s.port = port
       s.tcp_listener = true
       return true
+    end
+    if s.domain == "icmp" then
+      -- AF_ICMP: bind to filter address (root-only)
+      if not K.net_icmp then return nil, "ICMP not available" end
+      return K.net_icmp.socket_bind(proc, s.icmp_sock, path)
     end
     if s.domain ~= "unix" then return nil, "invalid argument" end
     if unix_sockets[path] then return nil, "address in use" end
@@ -444,6 +460,11 @@ return function(K)
       if s.tcp_conn.state ~= "ESTABLISHED" then return nil, "not connected" end
       return K.net_transport.tcp_send(proc, s.tcp_conn, data)
     end
+    if s.domain == "icmp" then
+      -- AF_ICMP: send ICMP packet
+      if not K.net_icmp then return nil, "ICMP not available" end
+      return K.net_icmp.socket_send(proc, s.icmp_sock, data)
+    end
     if s.socktype == "datagram" then
       -- datagram: send to peer's queue
       local target = s.peer_sock
@@ -487,6 +508,11 @@ return function(K)
       if s.closed then return nil end
       return K.net_transport.tcp_recv(proc, s.tcp_conn)
     end
+    if s.domain == "icmp" then
+      -- AF_ICMP: recv ICMP packet
+      if not K.net_icmp then return nil end
+      return K.net_icmp.socket_recv(proc, s.icmp_sock, n, flags)
+    end
     if s.socktype == "datagram" then
       if #s.queue > 0 then
         local d = s.queue[1]
@@ -520,10 +546,19 @@ return function(K)
     return M.pipe_read(proc, { type = "pipe_r", pipe = inp }, n)
   end
 
-  -- Send a datagram to a specific address (AF_MODEM)
+  -- Send a datagram to a specific address (AF_MODEM or AF_ICMP)
   function M.socket_sendto(proc, fd, data, dest_ip, dest_port)
     local s = fd.sock
     if s.closed then return nil, "closed" end
+    if s.domain == "icmp" then
+      -- AF_ICMP: sendto with destination IP
+      if not K.net_icmp then return nil, "ICMP not available" end
+      local ip4 = K.net.str_to_ip(dest_ip)
+      if not ip4 then return nil, "invalid address" end
+      s.icmp_sock.dest_ip = ip4
+      s.icmp_sock.state = "bound"
+      return K.net_icmp.socket_sendto(proc, s.icmp_sock, data, ip4, dest_port)
+    end
     if s.domain ~= "modem" then return nil, "invalid argument" end
     if s.state ~= "bound" then return nil, "not bound" end
     if dest_ip == string.char(255, 255, 255, 255) and not s.broadcast then
@@ -532,10 +567,15 @@ return function(K)
     return K.net_transport.udp_send(s.port, dest_ip, dest_port, data)
   end
 
-  -- Receive a datagram with sender address (AF_MODEM). Blocks.
+  -- Receive a datagram with sender address (AF_MODEM or AF_ICMP). Blocks.
   function M.socket_recvfrom(proc, fd)
     local s = fd.sock
     if s.closed then return nil end
+    if s.domain == "icmp" then
+      -- AF_ICMP: recvfrom returns data + source IP
+      if not K.net_icmp then return nil end
+      return K.net_icmp.socket_recv(proc, s.icmp_sock, nil, nil)
+    end
     if s.domain ~= "modem" then return nil, "invalid argument" end
     if s.state ~= "bound" then return nil, "not bound" end
     return K.net_transport.udp_recv(proc, s.port)
@@ -591,6 +631,9 @@ return function(K)
     if s.tcp_conn and not s.tcp_conn.closed then
       K.net_transport.tcp_close(s.tcp_conn)
     end
+    if s.domain == "icmp" and s.icmp_sock and K.net_icmp then
+      K.net_icmp.socket_close(s.icmp_sock)
+    end
     if s.path and unix_sockets[s.path] == s then
       unix_sockets[s.path] = nil
       K.vfs.drop_socket(s.path)
@@ -618,6 +661,10 @@ return function(K)
     end
     if s.domain == "http" then
       return s.http_response ~= nil or s.http_error ~= nil
+    end
+    if s.domain == "icmp" then
+      if K.net_icmp then return K.net_icmp.socket_readable(s.icmp_sock) end
+      return false
     end
     if s.socktype == "datagram" then return #s.queue > 0 end
     if s.state == "listening" then return #s.backlog > 0 end

@@ -391,12 +391,8 @@ return function(K)
   end
 
   function M._demux(proto, data, src)
-    if proto == 1 then
-      M._icmp_handle(data, src)
-    else
-      local h = M.protos[proto]
-      if h then h(data, src) end
-    end
+    local h = M.protos[proto]
+    if h then h(data, src) end
   end
 
   function M.ip_handle(payload)
@@ -449,19 +445,6 @@ return function(K)
   end
 
   -- ---- ICMP (echo only) ----
-
-  function M._icmp_handle(data, src)
-    if #data < 8 then return end
-    local typ = data:byte(1)
-    if typ == 8 then
-      -- echo request -> echo reply (type 0)
-      local body = data:sub(9)
-      local reply = string.char(0, 0, 0, 0) .. data:sub(5, 8) .. body
-      local cs = M.ip_checksum(reply)
-      reply = string.char(0, 0, math.floor(cs / 256), cs % 256) .. data:sub(5, 8) .. body
-      M.send_ip(src, 1, reply)
-    end
-  end
 
   -- ---- timers ----
 

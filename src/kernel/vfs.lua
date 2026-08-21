@@ -117,6 +117,11 @@ return function(K)
     for _, d in ipairs({ "/tmp", "/boot", "/rom" }) do
       if not fs_mod.exists(d) then fs_mod.make_dir(d) end
     end
+    -- ensure /var/lib/pine dirs exist (package manager)
+    for _, d in ipairs({ "/var", "/var/lib", "/var/lib/pine",
+      "/var/lib/pine/db", "/var/lib/pine/conffiles", "/var/lib/pine/stage" }) do
+      if not fs_mod.exists(d) then fs_mod.make_dir(d) end
+    end
     -- tmpfs /tmp: wipe contents at boot (spec: "чистится при старте")
     local function wipe(dir)
       for _, name in ipairs(fs_mod.list(dir) or {}) do
@@ -235,7 +240,8 @@ return function(K)
         local tgt = ino.target
         if tgt:sub(1, 1) ~= "/" then
           -- relative target: resolve against parent dir
-          local parent = p:match("^(.*)/[^/]+$") or "/"
+          local parent = p:match("^(.*)/[^/]+$")
+    if parent == "" then parent = "/" end
           tgt = parent .. "/" .. tgt
         end
         p = M.normalize(tgt)
@@ -606,7 +612,8 @@ return function(K)
     if not ino then
       if not creating then return nil, "no such file" end
       -- create: check parent dir + permission
-      local parent = p:match("^(.*)/[^/]+$") or "/"
+      local parent = p:match("^(.*)/[^/]+$")
+    if parent == "" then parent = "/" end
       local pino = M.get_inode(parent)
       if not pino or pino.type ~= "dir" then return nil, "no such directory" end
       if not fs_mod.check_access(proc, pino, "w") then return nil, "permission denied" end
@@ -742,7 +749,8 @@ return function(K)
       return nil, "read-only or virtual"
     end
     if fs_mod.exists(p) then return nil, "exists" end
-    local parent = p:match("^(.*)/[^/]+$") or "/"
+    local parent = p:match("^(.*)/[^/]+$")
+    if parent == "" then parent = "/" end
     local pino = M.get_inode(parent)
     if not pino or pino.type ~= "dir" then return nil, "no such directory" end
     if not fs_mod.check_access(proc, pino, "w") then return nil, "permission denied" end
@@ -754,7 +762,8 @@ return function(K)
   -- mkfifo
   function M.mkfifo(proc, path, mode)
     local p = M.resolve(proc, path)
-    local parent = p:match("^(.*)/[^/]+$") or "/"
+    local parent = p:match("^(.*)/[^/]+$")
+    if parent == "" then parent = "/" end
     local pino = M.get_inode(parent)
     if not pino or pino.type ~= "dir" then return nil, "no such directory" end
     if not fs_mod.check_access(proc, pino, "w") then return nil, "permission denied" end
@@ -829,7 +838,8 @@ return function(K)
   -- symlink
   function M.symlink(proc, target, path)
     local p = M.resolve(proc, path)
-    local parent = p:match("^(.*)/[^/]+$") or "/"
+    local parent = p:match("^(.*)/[^/]+$")
+    if parent == "" then parent = "/" end
     local pino = M.get_inode(parent)
     if not pino or pino.type ~= "dir" then return nil, "no such directory" end
     if not fs_mod.check_access(proc, pino, "w") then return nil, "permission denied" end
@@ -903,8 +913,9 @@ return function(K)
   end
 
   -- load a Lua file from VFS with an env (for process spawn)
+  -- mode=nil accepts both text and binary (string.dump'd bytecode) chunks.
   function M.loadfile(path, env)
-    local f, err = loadfile(path, "t", env)
+    local f, err = loadfile(path, nil, env)
     return f, err
   end
 

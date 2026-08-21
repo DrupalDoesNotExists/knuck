@@ -24,14 +24,15 @@ return function(K)
     -- nothing yet
   end
 
-  -- Build a sandbox env for a process: safe libs + syscall wrappers
-  local function make_env()
+  -- Build a sandbox env for a process: safe libs + syscall wrappers.
+  -- system=true grants full env (load, io, os, etc.) for privileged processes.
+  local function make_env(system)
     local env = {}
     for _, lib in ipairs(SAFE_LIBS) do
       env[lib] = _G[lib]
     end
     -- basic functions
-    for _, f in ipairs({ "type", "tostring", "pairs", "ipairs", "select",
+    for _, f in ipairs({ "type", "tostring", "tonumber", "pairs", "ipairs", "select",
       "error", "pcall", "xpcall", "next", "rawget", "rawset",
       "setmetatable", "getmetatable" }) do
       env[f] = _G[f]
@@ -77,6 +78,31 @@ return function(K)
       HUP = 1, INT = 2, QUIT = 3, KILL = 9, USR1 = 10, USR2 = 12,
       PIPE = 13, ALRM = 14, TERM = 15, CHLD = 17, CONT = 18, STOP = 19,
     }
+    if system then
+      -- Full env for system processes (pine.lua, hook scripts): grant
+      -- load/loadfile/dofile/io/os/require so they can load and run
+      -- Lua chunks that need raw filesystem or OS access.
+      env.load = load
+      if _G.loadstring then env.loadstring = _G.loadstring end
+      env.loadfile = loadfile
+      env.dofile = dofile
+      env.io = _G.io
+      env.os = _G.os
+      env.require = _G.require
+      -- print uses io.write for system processes (full io available)
+      env.print = function(...)
+        local parts = {}
+        for i = 1, select("#", ...) do parts[i] = tostring(select(i, ...)) end
+        env.io.write(table.concat(parts, "\t") .. "\n")
+      end
+    else
+      -- print: write to fd 1 (no io library in the sandbox)
+      env.print = function(...)
+        local parts = {}
+        for i = 1, select("#", ...) do parts[i] = tostring(select(i, ...)) end
+        env.write(1, table.concat(parts, "\t") .. "\n")
+      end
+    end
     return env
   end
 
@@ -90,9 +116,9 @@ return function(K)
     return f
   end
 
-  -- Spawn a process from a VFS path
-  function M.spawn(path, ppid, uid, gid, args, tty)
-    local env = make_env()
+  -- Spawn a process from a VFS path. system=true grants privileged env.
+  function M.spawn(path, ppid, uid, gid, args, tty, fds, parent, system)
+    local env = make_env(system)
     local fn, err = load_process(path, env)
     if not fn then return nil, err end
 
@@ -117,10 +143,12 @@ return function(K)
       tty = tty or 1,
       console_mode = "cooked",  -- /dev/console input: "cooked" (lines) | "raw" (events)
       env = env,
+      environ = {},  -- environment variables (name -> value), inherited on spawn
       fds = { [0] = { type = "console", mode = "r" }, [1] = { type = "console", mode = "w" }, [2] = { type = "console", mode = "w" } },
       children = {},
       exitcode = nil,
       pending_result = nil,
+      system = system or false,  -- system process: full env (load/io/os)
       sig = {
         handlers = {},    -- sig_num -> fn | "ignore" | "default"
         pending = {},     -- set of sig_nums awaiting delivery
@@ -128,6 +156,24 @@ return function(K)
         _pending_result = nil,  -- saved syscall result during signal delivery
       },
     }
+
+    -- Wire child stdin/stdout/stderr to the parent's open fds (for shell
+    -- redirection and pipelines). Shares the underlying open file
+    -- description, so the child and parent see the same offset/socket.
+    if fds and parent and parent.fds then
+      for slot, src in pairs(fds) do
+        if parent.fds[src] then
+          proc.fds[slot] = parent.fds[src]
+        end
+      end
+    end
+
+    -- Inherit environment variables from the parent.
+    if parent and parent.environ then
+      for k, v in pairs(parent.environ) do
+        proc.environ[k] = v
+      end
+    end
 
     -- Create the coroutine; pass args
     proc.co = coroutine.create(function()
