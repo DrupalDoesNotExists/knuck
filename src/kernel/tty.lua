@@ -114,7 +114,7 @@ return function(K)
         t.line = t.line .. ch
         echo(ch)  -- echo typed character to active terminal
       end
-    elseif ev[1] == "key" and ev[2] == 28 then  -- Enter key
+    elseif ev[1] == "key" and (ev[2] == 28 or ev[2] == 13 or ev[2] == 257) then  -- Enter key
       echo("\n")
       local line = t.line
       t.line = ""
